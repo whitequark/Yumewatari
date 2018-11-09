@@ -10,12 +10,22 @@ class Yumewatari(Module):
              ("tp0", 0, Pins("X3:5"), IOStandard("LVCMOS33")),
         ])
 
-        refclk = self.platform.request("ext_clk")
-        self.clock_domains.cd_refclk = ClockDomain()
-        self.comb += self.cd_refclk.clk.eq(refclk.p)
+        pcie = self.platform.request("pcie_x1")
 
-        refcounter = Signal(32)
-        self.sync.refclk += refcounter.eq(refcounter + 1)
+        refclk = Signal() # reference clock
+
+        self.specials.extref0 = Instance("EXTREFB",
+            i_REFCLKP=pcie.clk_p,
+            i_REFCLKN=pcie.clk_n,
+            o_REFCLKO=refclk,
+            p_REFCK_PWDNB="0b1",
+            p_REFCK_RTERM="0b1",
+            p_REFCK_DCBIAS_EN="0b0",
+        )
+        self.extref0.attr.add(("LOC", "EXTREF0"))
+
+        self.clock_domains.cd_refclk = ClockDomain()
+        self.comb += self.cd_refclk.clk.eq(refclk)
 
         rpclk = Signal()  # recovered word clock
         rxd0  = Signal(8) # receive data
@@ -33,7 +43,6 @@ class Yumewatari(Module):
         txds  = Signal()  # disparity
         tlol  = Signal()  # loss of lock
 
-        pcie = self.platform.request("pcie_x1")
         self.specials.dcu0 = Instance("DCUA",
             # DCU — power management
             p_D_MACROPDB="0b1",
@@ -47,7 +56,7 @@ class Yumewatari(Module):
             i_D_FFC_TRST=0,
 
             # DCU — clocking
-            i_D_REFCLKI=refclk.p,
+            i_D_REFCLKI=refclk,
             o_D_FFS_PLOL=tlol,
             p_D_REFCK_MODE="0b100",         # 25x REFCLK
             p_D_TX_MAX_RATE="2.5",          # 2.5 Gbps
@@ -100,7 +109,7 @@ class Yumewatari(Module):
             p_CH0_CTC_BYPASS="0b1",         # bypass CTC FIFO
 
             # RX CH ­— clocking
-            i_CH0_RX_REFCLK=refclk.p,
+            i_CH0_RX_REFCLK=refclk,
             o_CH0_FF_RX_PCLK=rpclk,
             i_CH0_FF_RXI_CLK=rpclk,
 
@@ -210,6 +219,8 @@ class Yumewatari(Module):
             self.cd_tx.clk.eq(tpclk),
         ]
 
+        refclkcounter = Signal(32)
+        self.sync.refclk += refclkcounter.eq(refclkcounter + 1)
         rpclkcounter = Signal(32)
         self.sync.rx += rpclkcounter.eq(rpclkcounter + 1)
         tpclkcounter = Signal(32)
@@ -224,7 +235,7 @@ class Yumewatari(Module):
         led_err3 = self.platform.request("user_led")
         led_err4 = self.platform.request("user_led")
         self.comb += [
-            led_att1.eq(~(refcounter[25])),
+            led_att1.eq(~(refclkcounter[25])),
             led_att2.eq(~(rlsm)),
             led_sta1.eq(~(rpclkcounter[25])),
             led_sta2.eq(~(tpclkcounter[25])),
