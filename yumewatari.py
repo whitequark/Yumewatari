@@ -3,45 +3,37 @@ from migen.build.generic_platform import *
 from migen.build.platforms.versaecp55g import Platform
 
 
-class Yumewatari(Module):
-    def __init__(self, **kwargs):
-        self.platform = Platform(**kwargs)
-        self.platform.add_extension([
-             ("tp0", 0, Pins("X3:5"), IOStandard("LVCMOS33")),
-        ])
-
-        pcie = self.platform.request("pcie_x1")
-
-        refclk = Signal() # reference clock
+class PCIePHYx1(Module):
+    def __init__(self, pins):
+        self.refclk = Signal() # reference clock
 
         self.specials.extref0 = Instance("EXTREFB",
-            i_REFCLKP=pcie.clk_p,
-            i_REFCLKN=pcie.clk_n,
-            o_REFCLKO=refclk,
+            i_REFCLKP=pins.clk_p,
+            i_REFCLKN=pins.clk_n,
+            o_REFCLKO=self.refclk,
             p_REFCK_PWDNB="0b1",
             p_REFCK_RTERM="0b1",
             p_REFCK_DCBIAS_EN="0b0",
         )
         self.extref0.attr.add(("LOC", "EXTREF0"))
 
-        self.clock_domains.cd_refclk = ClockDomain()
-        self.comb += self.cd_refclk.clk.eq(refclk)
+        self.rxclk = Signal()  # recovered word clock
+        self.rlos  = Signal()  # loss of signal
+        self.rlol  = Signal()  # loss of lock
+        self.rlsm  = Signal()  # link state machine up
 
-        rxclk = Signal()  # recovered word clock
-        rxd0  = Signal(8) # receive data
-        rxk0  = Signal()  # receive comma
-        rxde0 = Signal()  # disparity error
-        rxce0 = Signal()  # coding violation error
-        rlos  = Signal()  # loss of signal
-        rlol  = Signal()  # loss of lock
-        rlsm  = Signal()  # link state machine up
+        self.rxd0  = Signal(8) # receive data
+        self.rxk0  = Signal()  # receive comma
+        self.rxde0 = Signal()  # disparity error
+        self.rxce0 = Signal()  # coding violation error
 
-        txclk = Signal()  # generated word clock
-        txd0  = Signal(8) # transmit data
-        txk0  = Signal()  # transmit comma
-        txfd  = Signal()  # force disparity
-        txds  = Signal()  # disparity
-        tlol  = Signal()  # loss of lock
+        self.txclk = Signal()  # generated word clock
+        self.tlol  = Signal()  # loss of lock
+
+        self.txd0  = Signal(8) # transmit data
+        self.txk0  = Signal()  # transmit comma
+        self.txfd  = Signal()  # force disparity
+        self.txds  = Signal()  # disparity
 
         self.specials.dcu0 = Instance("DCUA",
             # DCU — power management
@@ -56,8 +48,8 @@ class Yumewatari(Module):
             i_D_FFC_TRST=0,
 
             # DCU — clocking
-            i_D_REFCLKI=refclk,
-            o_D_FFS_PLOL=tlol,
+            i_D_REFCLKI=self.refclk,
+            o_D_FFS_PLOL=self.tlol,
             p_D_REFCK_MODE="0b100",         # 25x REFCLK
             p_D_TX_MAX_RATE="2.5",          # 2.5 Gbps
             p_D_TX_VCO_CK_DIV="0b000",      # DIV/1
@@ -100,8 +92,8 @@ class Yumewatari(Module):
             i_CH0_FFC_LANE_RX_RST=0,
 
             # RX CH ­— input
-            i_CH0_HDINP=pcie.rx_p,
-            i_CH0_HDINN=pcie.rx_n,
+            i_CH0_HDINP=pins.rx_p,
+            i_CH0_HDINN=pins.rx_n,
 
             p_CH0_RTERM_RX="0d22",          # 50 Ohm (wizard value used, does not match datasheet)
             p_CH0_RXIN_CM="0b11",           # CMFB (wizard value used)
@@ -109,9 +101,9 @@ class Yumewatari(Module):
             p_CH0_CTC_BYPASS="0b1",         # bypass CTC FIFO
 
             # RX CH ­— clocking
-            i_CH0_RX_REFCLK=refclk,
-            o_CH0_FF_RX_PCLK=rxclk,
-            i_CH0_FF_RXI_CLK=rxclk,
+            i_CH0_RX_REFCLK=self.refclk,
+            o_CH0_FF_RX_PCLK=self.rxclk,
+            i_CH0_FF_RXI_CLK=self.rxclk,
 
             p_CH0_CDR_MAX_RATE="2.5",       # 2.5 Gbps
             p_CH0_RX_DCO_CK_DIV="0b000",    # DIV/1
@@ -138,7 +130,7 @@ class Yumewatari(Module):
             p_CH0_DCOSTEP="0b11",           # end undocumented
 
             # RX CH — link state machine
-            o_CH0_FFS_LS_SYNC_STATUS=rlsm,
+            o_CH0_FFS_LS_SYNC_STATUS=self.rlsm,
             p_CH0_LSM_DISABLE="0b1",
             p_CH0_ENABLE_CG_ALIGN="0b1",    # enable comma aligner
             p_CH0_UDF_COMMA_MASK="0x3ff",
@@ -153,20 +145,20 @@ class Yumewatari(Module):
             p_CH0_CC_MATCH_4="0x11C",       # K28.0 SKIP
 
             # RX CH — loss of signal
-            o_CH0_FFS_RLOS=rlos,
+            o_CH0_FFS_RLOS=self.rlos,
             p_CH0_RLOS_SEL="0b1",
             p_CH0_RX_LOS_EN="0b1",
             p_CH0_RX_LOS_LVL="0b100",       # Lattice "TBD" (wizard value used)
             p_CH0_RX_LOS_CEQ="0b11",        # Lattice "TBD" (wizard value used)
 
             # RX CH — loss of lock
-            o_CH0_FFS_RLOL=rlol,
+            o_CH0_FFS_RLOL=self.rlol,
 
             # RX CH — data
-            **{"o_CH0_FF_RX_D_%d" % (0 + n): rxd0[n] for n in range(8)},
-            o_CH0_FF_RX_D_8=rxk0,
-            o_CH0_FF_RX_D_9=rxde0,
-            o_CH0_FF_RX_D_10=rxce0,
+            **{"o_CH0_FF_RX_D_%d" % (0 + n): self.rxd0[n] for n in range(8)},
+            o_CH0_FF_RX_D_8=self.rxk0,
+            o_CH0_FF_RX_D_9=self.rxde0,
+            o_CH0_FF_RX_D_10=self.rxce0,
 
             # TX CH — power management
             p_CH0_TPWDNB="0b1",
@@ -176,8 +168,8 @@ class Yumewatari(Module):
             i_CH0_FFC_LANE_TX_RST=0,
 
             # TX CH ­— output
-            i_CH0_HDOUTP=pcie.tx_p,
-            i_CH0_HDOUTN=pcie.tx_n,
+            i_CH0_HDOUTP=pins.tx_p,
+            i_CH0_HDOUTN=pins.tx_n,
 
             p_CH0_TXAMPLITUDE="0d1000",     # 1000 mV
 
@@ -195,28 +187,39 @@ class Yumewatari(Module):
             p_CH0_TDRV_SLICE5_SEL="0b00",   # power down
 
             # TX CH ­— clocking
-            o_CH0_FF_TX_PCLK=txclk,
-            i_CH0_FF_TXI_CLK=txclk,
+            o_CH0_FF_TX_PCLK=self.txclk,
+            i_CH0_FF_TXI_CLK=self.txclk,
 
             # TX CH — data
-            **{"o_CH0_FF_TX_D_%d" % n: txd0[n] for n in range(8)},
-            o_CH0_FF_TX_D_8=txk0,
-            o_CH0_FF_TX_D_9=txfd,
-            o_CH0_FF_TX_D_10=txds,
+            **{"o_CH0_FF_TX_D_%d" % n: self.txd0[n] for n in range(8)},
+            o_CH0_FF_TX_D_8=self.txk0,
+            o_CH0_FF_TX_D_9=self.txfd,
+            o_CH0_FF_TX_D_10=self.txds,
         )
         self.dcu0.attr.add(("LOC", "DCU0"))
         self.dcu0.attr.add(("CHAN", "CH0"))
 
+
+class Yumewatari(Module):
+    def __init__(self, **kwargs):
+        self.platform = Platform(**kwargs)
+        self.platform.add_extension([
+             ("tp0", 0, Pins("X3:5"), IOStandard("LVCMOS33")),
+        ])
+
+        self.submodules.phy = phy = PCIePHYx1(self.platform.request("pcie_x1"))
         self.comb += [
-            txd0.eq(0x7C),
-            txk0.eq(1),
+            phy.txd0.eq(0x7C),
+            phy.txk0.eq(1),
         ]
 
+        self.clock_domains.cd_refclk = ClockDomain()
         self.clock_domains.cd_rx = ClockDomain()
         self.clock_domains.cd_tx = ClockDomain()
         self.comb += [
-            self.cd_rx.clk.eq(rxclk),
-            self.cd_tx.clk.eq(txclk),
+            self.cd_refclk.clk.eq(phy.refclk),
+            self.cd_rx.clk.eq(phy.rxclk),
+            self.cd_tx.clk.eq(phy.txclk),
         ]
 
         refclkcounter = Signal(32)
@@ -236,17 +239,17 @@ class Yumewatari(Module):
         led_err4 = self.platform.request("user_led")
         self.comb += [
             led_att1.eq(~(refclkcounter[25])),
-            led_att2.eq(~(rlsm)),
+            led_att2.eq(~(phy.rlsm)),
             led_sta1.eq(~(rxclkcounter[25])),
             led_sta2.eq(~(txclkcounter[25])),
-            led_err1.eq(~(rlos)),
-            led_err2.eq(~(rlol | tlol)),
-            led_err3.eq(~(rxde0)),
-            led_err4.eq(~(rxce0)),
+            led_err1.eq(~(phy.rlos)),
+            led_err2.eq(~(phy.rlol | phy.tlol)),
+            led_err3.eq(~(phy.rxde0)),
+            led_err4.eq(~(phy.rxce0)),
         ]
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(rxde0)
+        self.comb += tp0.eq(phy.rxde0)
 
 
 if __name__ == "__main__":
