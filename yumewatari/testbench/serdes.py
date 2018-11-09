@@ -19,11 +19,12 @@ class SERDESTestbench(Module):
 
         self.submodules.serdes = serdes = \
             LatticePCIeSERDES(self.platform.request("pcie_x1"),
-                              bypass_8b10b=True)
+                              bypass_8b10b=False)
         self.comb += [
-            # serdes.txd0.eq(0x7C),
-            # serdes.txk0.eq(1),
-            serdes.txd.eq(0b1111100000)
+            serdes.txd.eq(0x7C),
+            serdes.txk.eq(1),
+            serdes.rxdet.eq(1),
+            serdes.rxinv.eq(0),
         ]
 
         self.clock_domains.cd_ref = ClockDomain()
@@ -85,10 +86,10 @@ class SERDESTestbench(Module):
         self.submodules.symbols = symbols = ClockDomainsRenamer({
             "write": "rx", "read": "ref"
         })(
-            AsyncFIFO(width=10, depth=CAPTURE_DEPTH)
+            AsyncFIFO(width=16, depth=capture_depth)
         )
         self.comb += [
-            symbols.din.eq(serdes.rxd),
+            symbols.din.eq(Cat(serdes.rxd, serdes.rxk, serdes.rlsm)),
             symbols.we.eq(capture)
         ]
         self.sync.rx += [
@@ -133,7 +134,7 @@ class SERDESTestbench(Module):
         self.fsm.act("HIGH",
             If(symbols.readable & uart.tx_rdy,
                 uart.tx_ack.eq(1),
-                uart.tx_data.eq(symbols.dout[8:10]),
+                uart.tx_data.eq(symbols.dout[8:]),
                 NextState("LOW")
             ).Elif(~symbols.readable,
                 NextState("WAIT")
@@ -149,7 +150,7 @@ class SERDESTestbench(Module):
         )
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(uart.bus.tx_o)
+        self.comb += tp0.eq(capture)
 
 # -------------------------------------------------------------------------------------------------
 
@@ -184,6 +185,17 @@ if __name__ == "__main__":
 
         for x in range(CAPTURE_DEPTH):
             hi, lo = port.read(2)
-            print("{:010b}".format((hi << 8) | lo), end=" ")
+            word = (hi << 8) | lo
+            if word & 0x1ff == 0x1ee:
+                print("{}KEEEEEEEE".format(
+                    "L" if word & (1 <<  9) else " ",
+                ), end=" ")
+            else:
+                print("{}{}{:08b}".format(
+                    "L" if word & (1 <<  9) else " ",
+                    "K" if word & (1 <<  8) else " ",
+                    word & 0xff,
+                ), end=" ")
+            # print("".join(reversed("{:010b}".format(word & 3ff)), end=" ")
             if x % 8 == 7:
                 print()

@@ -13,12 +13,14 @@ class LatticePCIeSERDES(Module):
             i_REFCLKN=pins.clk_n,
             o_REFCLKO=self.refclk,
             p_REFCK_PWDNB="0b1",
-            p_REFCK_RTERM="0b1",
+            p_REFCK_RTERM="0b1",            # 100 Ohm
             p_REFCK_DCBIAS_EN="0b0",
         )
         self.extref0.attr.add(("LOC", "EXTREF0"))
 
         self.rxclk = Signal()  # recovered word clock
+        self.rxdet = Signal()  # bit-align received data
+        self.rxinv = Signal()  # invert received data
         self.rlos  = Signal()  # loss of signal
         self.rlol  = Signal()  # loss of lock
         self.rlsm  = Signal()  # link state machine up
@@ -26,26 +28,26 @@ class LatticePCIeSERDES(Module):
         self.txclk = Signal()  # generated word clock
         self.tlol  = Signal()  # loss of lock
 
-        rxbus = Signal(11)
-        txbus = Signal(11)
+        self.rxbus = Signal(24)
+        self.txbus = Signal(24)
         if bypass_8b10b:
             self.rxd   = Signal(10) # receive 10b symbols
-            self.comb += self.rxd.eq(rxbus)
+            self.comb += self.rxd.eq(self.rxbus)
 
             self.txd   = Signal(10) # transmit 10b symbols
-            self.comb += txbus.eq(self.txd)
+            self.comb += self.txbus.eq(self.txd)
         else:
             self.rxd   = Signal(8)  # receive data
             self.rxk   = Signal()   # receive comma
             self.rxde  = Signal()   # disparity error
             self.rxce  = Signal()   # coding violation error
-            self.comb += Cat(self.rxd, self.rxk, self.rxde, self.rxce).eq(rxbus)
+            self.comb += Cat(self.rxd, self.rxk, self.rxde, self.rxce).eq(self.rxbus)
 
             self.txd   = Signal(8)  # transmit data
             self.txk   = Signal()   # transmit comma
             self.txfd  = Signal()   # force disparity
             self.txds  = Signal()   # disparity
-            self.comb += txbus.eq(Cat(self.txd, self.txk, self.txfd, self.txds))
+            self.comb += self.txbus.eq(Cat(self.txd, self.txk, self.txfd, self.txds))
 
         self.specials.dcu0 = Instance("DCUA",
             # DCU — power management
@@ -106,23 +108,24 @@ class LatticePCIeSERDES(Module):
             # RX CH ­— input
             i_CH0_HDINP=pins.rx_p,
             i_CH0_HDINN=pins.rx_n,
+            i_CH0_FFC_SB_INV_RX=self.rxinv,
 
             p_CH0_RTERM_RX="0d22",          # 50 Ohm (wizard value used, does not match datasheet)
             p_CH0_RXIN_CM="0b11",           # CMFB (wizard value used)
             p_CH0_RXTERM_CM="0b11",         # RX Input (wizard value used)
-            p_CH0_CTC_BYPASS="0b1",         # bypass CTC FIFO
 
             # RX CH ­— clocking
             i_CH0_RX_REFCLK=self.refclk,
             o_CH0_FF_RX_PCLK=self.rxclk,
             i_CH0_FF_RXI_CLK=self.rxclk,
 
+            p_CH0_AUTO_FACQ_EN="0b1",       # undocumented (wizard value used)
+            p_CH0_AUTO_CALIB_EN="0b1",      # undocumented (wizard value used)
             p_CH0_CDR_MAX_RATE="2.5",       # 2.5 Gbps
             p_CH0_RX_DCO_CK_DIV="0b000",    # DIV/1
             p_CH0_PDEN_SEL="0b1",           # phase detector disabled on LOS
             p_CH0_SEL_SD_RX_CLK="0b1",      # FIFO driven by recovered clock
-            p_CH0_AUTO_FACQ_EN="0b1",       # undocumented (wizard value used)
-            p_CH0_AUTO_CALIB_EN="0b1",      # undocumented (wizard value used)
+            p_CH0_CTC_BYPASS="0b1",         # bypass CTC FIFO
 
             p_CH0_DCOATDCFG="0b00",         # begin undocumented (PCIe sample code used)
             p_CH0_DCOATDDLY="0b00",
@@ -142,19 +145,19 @@ class LatticePCIeSERDES(Module):
             p_CH0_DCOSTEP="0b11",           # end undocumented
 
             # RX CH — link state machine
+            i_CH0_FFC_SIGNAL_DETECT=self.rxdet,
             o_CH0_FFS_LS_SYNC_STATUS=self.rlsm,
-            p_CH0_LSM_DISABLE="0b1",
-            p_CH0_ENABLE_CG_ALIGN="0b0",    # enable comma aligner
-            p_CH0_UDF_COMMA_MASK="0x3ff",
-            p_CH0_UDF_COMMA_A="0x283",      # ???
-            p_CH0_UDF_COMMA_B="0x17C",      # K28.3 IDLE
+            p_CH0_ENABLE_CG_ALIGN="0b1",
+            p_CH0_UDF_COMMA_MASK="0x3ff",   # compare all 10 bits
+            p_CH0_UDF_COMMA_A="0x283",      # K28.5 inverted
+            p_CH0_UDF_COMMA_B="0x17C",      # K28.5
 
             p_CH0_MIN_IPG_CNT="0b11",       # minimum interpacket gap of 4
             p_CH0_MATCH_4_ENABLE="0b1",     # 4 character skip matching
-            p_CH0_CC_MATCH_1="0x1BC",       # K28.5 K
-            p_CH0_CC_MATCH_2="0x11C",       # K28.0 SKIP
-            p_CH0_CC_MATCH_3="0x11C",       # K28.0 SKIP
-            p_CH0_CC_MATCH_4="0x11C",       # K28.0 SKIP
+            p_CH0_CC_MATCH_1="0x1BC",       # K28.5
+            p_CH0_CC_MATCH_2="0x11C",       # K28.0
+            p_CH0_CC_MATCH_3="0x11C",       # K28.0
+            p_CH0_CC_MATCH_4="0x11C",       # K28.0
 
             # RX CH — loss of signal
             o_CH0_FFS_RLOS=self.rlos,
@@ -167,7 +170,7 @@ class LatticePCIeSERDES(Module):
             o_CH0_FFS_RLOL=self.rlol,
 
             # RX CH — data
-            **{"o_CH0_FF_RX_D_%d" % n: rxbus[n] for n in range(rxbus.nbits)},
+            **{"o_CH0_FF_RX_D_%d" % n: self.rxbus[n] for n in range(self.rxbus.nbits)},
             p_CH0_DEC_BYPASS="0b1" if bypass_8b10b else "0b0",
 
             # TX CH — power management
@@ -182,6 +185,7 @@ class LatticePCIeSERDES(Module):
             i_CH0_HDOUTN=pins.tx_n,
 
             p_CH0_TXAMPLITUDE="0d1000",     # 1000 mV
+            p_CH0_RTERM_TX="0d19",          # 50 Ohm
 
             p_CH0_TDRV_SLICE0_CUR="0b011",  # 400 uA
             p_CH0_TDRV_SLICE0_SEL="0b01",   # main data
@@ -201,7 +205,7 @@ class LatticePCIeSERDES(Module):
             i_CH0_FF_TXI_CLK=self.txclk,
 
             # TX CH — data
-            **{"o_CH0_FF_TX_D_%d" % n: txbus[n] for n in range(txbus.nbits)},
+            **{"o_CH0_FF_TX_D_%d" % n: self.txbus[n] for n in range(self.txbus.nbits)},
             p_CH0_ENC_BYPASS="0b1" if bypass_8b10b else "0b0",
         )
         self.dcu0.attr.add(("LOC", "DCU0"))
