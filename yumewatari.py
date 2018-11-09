@@ -4,7 +4,7 @@ from migen.build.platforms.versaecp55g import Platform
 
 
 class PCIePHYx1(Module):
-    def __init__(self, pins):
+    def __init__(self, pins, bypass_8b10b=False):
         self.refclk = Signal() # reference clock
 
         self.specials.extref0 = Instance("EXTREFB",
@@ -22,18 +22,29 @@ class PCIePHYx1(Module):
         self.rlol  = Signal()  # loss of lock
         self.rlsm  = Signal()  # link state machine up
 
-        self.rxd0  = Signal(8) # receive data
-        self.rxk0  = Signal()  # receive comma
-        self.rxde0 = Signal()  # disparity error
-        self.rxce0 = Signal()  # coding violation error
-
         self.txclk = Signal()  # generated word clock
         self.tlol  = Signal()  # loss of lock
 
-        self.txd0  = Signal(8) # transmit data
-        self.txk0  = Signal()  # transmit comma
-        self.txfd  = Signal()  # force disparity
-        self.txds  = Signal()  # disparity
+        rxbus = Signal(11)
+        txbus = Signal(11)
+        if bypass_8b10b:
+            self.rxd   = Signal(10) # receive 10b symbols
+            self.comb += self.rxd.eq(rxbus)
+
+            self.txd   = Signal(10) # transmit 10b symbols
+            self.comb += txbus.eq(self.txd)
+        else:
+            self.rxd   = Signal(8)  # receive data
+            self.rxk   = Signal()   # receive comma
+            self.rxde  = Signal()   # disparity error
+            self.rxce  = Signal()   # coding violation error
+            self.comb += Cat(self.rxd, self.rxk, self.rxde, self.rxce).eq(rxbus)
+
+            self.txd   = Signal(8)  # transmit data
+            self.txk   = Signal()   # transmit comma
+            self.txfd  = Signal()   # force disparity
+            self.txds  = Signal()   # disparity
+            self.comb += txbus.eq(Cat(self.txd, self.txk, self.txfd, self.txds))
 
         self.specials.dcu0 = Instance("DCUA",
             # DCU — power management
@@ -132,7 +143,7 @@ class PCIePHYx1(Module):
             # RX CH — link state machine
             o_CH0_FFS_LS_SYNC_STATUS=self.rlsm,
             p_CH0_LSM_DISABLE="0b1",
-            p_CH0_ENABLE_CG_ALIGN="0b1",    # enable comma aligner
+            p_CH0_ENABLE_CG_ALIGN="0b0",    # enable comma aligner
             p_CH0_UDF_COMMA_MASK="0x3ff",
             p_CH0_UDF_COMMA_A="0x283",      # ???
             p_CH0_UDF_COMMA_B="0x17C",      # K28.3 IDLE
@@ -155,10 +166,8 @@ class PCIePHYx1(Module):
             o_CH0_FFS_RLOL=self.rlol,
 
             # RX CH — data
-            **{"o_CH0_FF_RX_D_%d" % (0 + n): self.rxd0[n] for n in range(8)},
-            o_CH0_FF_RX_D_8=self.rxk0,
-            o_CH0_FF_RX_D_9=self.rxde0,
-            o_CH0_FF_RX_D_10=self.rxce0,
+            **{"o_CH0_FF_RX_D_%d" % n: rxbus[n] for n in range(rxbus.nbits)},
+            p_CH0_DEC_BYPASS="0b1" if bypass_8b10b else "0b0",
 
             # TX CH — power management
             p_CH0_TPWDNB="0b1",
@@ -191,10 +200,8 @@ class PCIePHYx1(Module):
             i_CH0_FF_TXI_CLK=self.txclk,
 
             # TX CH — data
-            **{"o_CH0_FF_TX_D_%d" % n: self.txd0[n] for n in range(8)},
-            o_CH0_FF_TX_D_8=self.txk0,
-            o_CH0_FF_TX_D_9=self.txfd,
-            o_CH0_FF_TX_D_10=self.txds,
+            **{"o_CH0_FF_TX_D_%d" % n: txbus[n] for n in range(txbus.nbits)},
+            p_CH0_ENC_BYPASS="0b1" if bypass_8b10b else "0b0",
         )
         self.dcu0.attr.add(("LOC", "DCU0"))
         self.dcu0.attr.add(("CHAN", "CH0"))
@@ -207,10 +214,12 @@ class Yumewatari(Module):
              ("tp0", 0, Pins("X3:5"), IOStandard("LVCMOS33")),
         ])
 
-        self.submodules.phy = phy = PCIePHYx1(self.platform.request("pcie_x1"))
+        self.submodules.phy = phy = PCIePHYx1(self.platform.request("pcie_x1"),
+                                              bypass_8b10b=True)
         self.comb += [
-            phy.txd0.eq(0x7C),
-            phy.txk0.eq(1),
+            # phy.txd0.eq(0x7C),
+            # phy.txk0.eq(1),
+            phy.txd.eq(0b1111100000)
         ]
 
         self.clock_domains.cd_refclk = ClockDomain()
@@ -244,12 +253,12 @@ class Yumewatari(Module):
             led_sta2.eq(~(txclkcounter[25])),
             led_err1.eq(~(phy.rlos)),
             led_err2.eq(~(phy.rlol | phy.tlol)),
-            led_err3.eq(~(phy.rxde0)),
-            led_err4.eq(~(phy.rxce0)),
+            led_err3.eq(~(0)),#phy.rxde0)),
+            led_err4.eq(~(0)),#phy.rxce0)),
         ]
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(phy.rxde0)
+        self.comb += tp0.eq(phy.rlsm)
 
 
 if __name__ == "__main__":
