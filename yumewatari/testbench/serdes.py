@@ -162,40 +162,41 @@ CAPTURE_DEPTH = 1024
 
 
 if __name__ == "__main__":
-    if sys.argv[1] == "run":
-        design = SERDESTestbench(CAPTURE_DEPTH)
-        design.platform.build(design, toolchain_path="/usr/local/diamond/3.10_x64/bin/lin64")
-        import subprocess
-        subprocess.call(["/home/whitequark/Projects/prjtrellis/tools/bit_to_svf.py",
-                         "build/top.bit",
-                         "build/top.svf"])
-        subprocess.call(["openocd",
-                         "-f", "/home/whitequark/Projects/"
-                               "prjtrellis/misc/openocd/ecp5-versa5g.cfg",
-                         "-c", "init; svf -quiet build/top.svf; exit"])
+    for arg in sys.argv[1:]:
+        if arg == "run":
+            design = SERDESTestbench(CAPTURE_DEPTH)
+            design.platform.build(design, toolchain_path="/usr/local/diamond/3.10_x64/bin/lin64")
+            import subprocess
+            subprocess.call(["/home/whitequark/Projects/prjtrellis/tools/bit_to_svf.py",
+                             "build/top.bit",
+                             "build/top.svf"])
+            subprocess.call(["openocd",
+                             "-f", "/home/whitequark/Projects/"
+                                   "prjtrellis/misc/openocd/ecp5-versa5g.cfg",
+                             "-c", "init; svf -quiet build/top.svf; exit"])
 
-    if sys.argv[1] == "grab":
-        port = serial.Serial(port='/dev/ttyUSB1', baudrate=115200)
-        port.write(b"\x00")
+        if arg == "grab":
+            port = serial.Serial(port='/dev/ttyUSB1', baudrate=115200)
+            port.write(b"\x00")
 
-        while True:
             while True:
+                while True:
+                    if port.read(1) == b"\xff": break
                 if port.read(1) == b"\xff": break
-            if port.read(1) == b"\xff": break
 
-        for x in range(CAPTURE_DEPTH):
-            hi, lo = port.read(2)
-            word = (hi << 8) | lo
-            if word & 0x1ff == 0x1ee:
-                print("{}KEEEEEEEE".format(
-                    "L" if word & (1 <<  9) else " ",
-                ), end=" ")
-            else:
-                print("{}{}{:08b}".format(
-                    "L" if word & (1 <<  9) else " ",
-                    "K" if word & (1 <<  8) else " ",
-                    word & 0xff,
-                ), end=" ")
-            # print("".join(reversed("{:010b}".format(word & 3ff)), end=" ")
-            if x % 8 == 7:
-                print()
+            for x in range(CAPTURE_DEPTH):
+                hi, lo = port.read(2)
+                word = (hi << 8) | lo
+                if word & 0x1ff == 0x1ee:
+                    print("{}KEEEEEEEE".format(
+                        "L" if word & (1 <<  9) else " ",
+                    ), end=" ")
+                else:
+                    print("{}{}{:08b}".format(
+                        "L" if word & (1 <<  9) else " ",
+                        "K" if word & (1 <<  8) else " ",
+                        word & 0xff,
+                    ), end=" ")
+                # print("".join(reversed("{:010b}".format(word & 3ff)), end=" ")
+                if x % 8 == 7:
+                    print()
