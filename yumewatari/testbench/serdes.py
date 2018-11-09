@@ -164,8 +164,14 @@ CAPTURE_DEPTH = 1024
 if __name__ == "__main__":
     for arg in sys.argv[1:]:
         if arg == "run":
-            design = SERDESTestbench(CAPTURE_DEPTH)
-            design.platform.build(design, toolchain_path="/usr/local/diamond/3.10_x64/bin/lin64")
+            toolchain = "trellis"
+            if toolchain == "trellis":
+                toolchain_path = "/usr/local/share/trellis"
+            elif toolchain == "diamond":
+                toolchain_path = "/usr/local/diamond/3.10_x64/bin/lin64"
+
+            design = SERDESTestbench(CAPTURE_DEPTH, toolchain=toolchain)
+            design.platform.build(design, toolchain_path=toolchain_path)
             import subprocess
             subprocess.call(["/home/whitequark/Projects/prjtrellis/tools/bit_to_svf.py",
                              "build/top.bit",

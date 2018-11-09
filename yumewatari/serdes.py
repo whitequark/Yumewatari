@@ -210,3 +210,4 @@ class LatticePCIeSERDES(Module):
         )
         self.dcu0.attr.add(("LOC", "DCU0"))
         self.dcu0.attr.add(("CHAN", "CH0"))
+        self.dcu0.attr.add(("BEL", "X42/Y71/DCU"))
