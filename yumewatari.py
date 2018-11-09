@@ -17,15 +17,21 @@ class Yumewatari(Module):
         refcounter = Signal(32)
         self.sync.refclk += refcounter.eq(refcounter + 1)
 
-        rpclk = Signal()
-        rxd0  = Signal(8)
-        rxk0  = Signal()
-        rlol  = Signal()
-        rlos  = Signal()
+        rpclk = Signal()  # recovered word clock
+        rxd0  = Signal(8) # receive data
+        rxk0  = Signal()  # receive comma
+        rxde0 = Signal()  # disparity error
+        rxce0 = Signal()  # coding violation error
+        rlos  = Signal()  # loss of signal
+        rlol  = Signal()  # loss of lock
+        rlsm  = Signal()  # link state machine up
 
-        tpclk = Signal()
-        txd0  = Signal(8)
-        txk0  = Signal()
+        tpclk = Signal()  # generated word clock
+        txd0  = Signal(8) # transmit data
+        txk0  = Signal()  # transmit comma
+        txfd  = Signal()  # force disparity
+        txds  = Signal()  # disparity
+        tlol  = Signal()  # loss of lock
 
         pcie = self.platform.request("pcie_x1")
         self.specials.dcu0 = Instance("DCUA",
@@ -42,10 +48,11 @@ class Yumewatari(Module):
 
             # DCU — clocking
             i_D_REFCLKI=refclk.p,
+            o_D_FFS_PLOL=tlol,
             p_D_REFCK_MODE="0b100",         # 25x REFCLK
             p_D_TX_MAX_RATE="2.5",          # 2.5 Gbps
             p_D_TX_VCO_CK_DIV="0b000",      # DIV/1
-            p_D_BITCLK_LOCAL_EN="0b1",
+            p_D_BITCLK_LOCAL_EN="0b1",      # undocumented (PCIe sample code used)
 
             # DCU ­— unknown
             p_D_CMUSETBIASI="0b00",         # begin undocumented (PCIe sample code used)
@@ -122,7 +129,19 @@ class Yumewatari(Module):
             p_CH0_DCOSTEP="0b11",           # end undocumented
 
             # RX CH — link state machine
+            o_CH0_FFS_LS_SYNC_STATUS=rlsm,
             p_CH0_LSM_DISABLE="0b1",
+            p_CH0_ENABLE_CG_ALIGN="0b1",    # enable comma aligner
+            p_CH0_UDF_COMMA_MASK="0x3ff",
+            p_CH0_UDF_COMMA_A="0x283",      # ???
+            p_CH0_UDF_COMMA_B="0x17C",      # K28.3 IDLE
+
+            p_CH0_MIN_IPG_CNT="0b11",       # minimum interpacket gap of 4
+            p_CH0_MATCH_4_ENABLE="0b1",     # 4 character skip matching
+            p_CH0_CC_MATCH_1="0x1BC",       # K28.5 K
+            p_CH0_CC_MATCH_2="0x11C",       # K28.0 SKIP
+            p_CH0_CC_MATCH_3="0x11C",       # K28.0 SKIP
+            p_CH0_CC_MATCH_4="0x11C",       # K28.0 SKIP
 
             # RX CH — loss of signal
             o_CH0_FFS_RLOS=rlos,
@@ -135,8 +154,10 @@ class Yumewatari(Module):
             o_CH0_FFS_RLOL=rlol,
 
             # RX CH — data
-            **{"o_CH0_FF_RX_D_%d" % n: rxd0[n] for n in range(8)},
+            **{"o_CH0_FF_RX_D_%d" % (0 + n): rxd0[n] for n in range(8)},
             o_CH0_FF_RX_D_8=rxk0,
+            o_CH0_FF_RX_D_9=rxde0,
+            o_CH0_FF_RX_D_10=rxce0,
 
             # TX CH — power management
             p_CH0_TPWDNB="0b1",
@@ -171,9 +192,16 @@ class Yumewatari(Module):
             # TX CH — data
             **{"o_CH0_FF_TX_D_%d" % n: txd0[n] for n in range(8)},
             o_CH0_FF_TX_D_8=txk0,
+            o_CH0_FF_TX_D_9=txfd,
+            o_CH0_FF_TX_D_10=txds,
         )
         self.dcu0.attr.add(("LOC", "DCU0"))
         self.dcu0.attr.add(("CHAN", "CH0"))
+
+        self.comb += [
+            txd0.eq(0x7C),
+            txk0.eq(1),
+        ]
 
         self.clock_domains.cd_rx = ClockDomain()
         self.clock_domains.cd_tx = ClockDomain()
@@ -197,17 +225,17 @@ class Yumewatari(Module):
         led_err4 = self.platform.request("user_led")
         self.comb += [
             led_att1.eq(~(refcounter[25])),
-            led_att2.eq(~(0)),
+            led_att2.eq(~(rlsm)),
             led_sta1.eq(~(rpclkcounter[25])),
             led_sta2.eq(~(tpclkcounter[25])),
-            led_err1.eq(~(rxk0 & (rxd0 == 0xee))),
-            led_err2.eq(~(rlos)),
-            led_err3.eq(~(rlol)),
-            led_err4.eq(~(0)),
+            led_err1.eq(~(rlos)),
+            led_err2.eq(~(rlol | tlol)),
+            led_err3.eq(~(rxde0)),
+            led_err4.eq(~(rxce0)),
         ]
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(rpclkcounter[1])
+        self.comb += tp0.eq(rxde0)
 
 
 if __name__ == "__main__":
