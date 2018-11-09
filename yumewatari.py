@@ -27,7 +27,7 @@ class Yumewatari(Module):
         self.clock_domains.cd_refclk = ClockDomain()
         self.comb += self.cd_refclk.clk.eq(refclk)
 
-        rpclk = Signal()  # recovered word clock
+        rxclk = Signal()  # recovered word clock
         rxd0  = Signal(8) # receive data
         rxk0  = Signal()  # receive comma
         rxde0 = Signal()  # disparity error
@@ -36,7 +36,7 @@ class Yumewatari(Module):
         rlol  = Signal()  # loss of lock
         rlsm  = Signal()  # link state machine up
 
-        tpclk = Signal()  # generated word clock
+        txclk = Signal()  # generated word clock
         txd0  = Signal(8) # transmit data
         txk0  = Signal()  # transmit comma
         txfd  = Signal()  # force disparity
@@ -110,8 +110,8 @@ class Yumewatari(Module):
 
             # RX CH ­— clocking
             i_CH0_RX_REFCLK=refclk,
-            o_CH0_FF_RX_PCLK=rpclk,
-            i_CH0_FF_RXI_CLK=rpclk,
+            o_CH0_FF_RX_PCLK=rxclk,
+            i_CH0_FF_RXI_CLK=rxclk,
 
             p_CH0_CDR_MAX_RATE="2.5",       # 2.5 Gbps
             p_CH0_RX_DCO_CK_DIV="0b000",    # DIV/1
@@ -195,8 +195,8 @@ class Yumewatari(Module):
             p_CH0_TDRV_SLICE5_SEL="0b00",   # power down
 
             # TX CH ­— clocking
-            o_CH0_FF_TX_PCLK=tpclk,
-            i_CH0_FF_TXI_CLK=tpclk,
+            o_CH0_FF_TX_PCLK=txclk,
+            i_CH0_FF_TXI_CLK=txclk,
 
             # TX CH — data
             **{"o_CH0_FF_TX_D_%d" % n: txd0[n] for n in range(8)},
@@ -215,16 +215,16 @@ class Yumewatari(Module):
         self.clock_domains.cd_rx = ClockDomain()
         self.clock_domains.cd_tx = ClockDomain()
         self.comb += [
-            self.cd_rx.clk.eq(rpclk),
-            self.cd_tx.clk.eq(tpclk),
+            self.cd_rx.clk.eq(rxclk),
+            self.cd_tx.clk.eq(txclk),
         ]
 
         refclkcounter = Signal(32)
         self.sync.refclk += refclkcounter.eq(refclkcounter + 1)
-        rpclkcounter = Signal(32)
-        self.sync.rx += rpclkcounter.eq(rpclkcounter + 1)
-        tpclkcounter = Signal(32)
-        self.sync.tx += tpclkcounter.eq(tpclkcounter + 1)
+        rxclkcounter = Signal(32)
+        self.sync.rx += rxclkcounter.eq(rxclkcounter + 1)
+        txclkcounter = Signal(32)
+        self.sync.tx += txclkcounter.eq(txclkcounter + 1)
 
         led_att1 = self.platform.request("user_led")
         led_att2 = self.platform.request("user_led")
@@ -237,8 +237,8 @@ class Yumewatari(Module):
         self.comb += [
             led_att1.eq(~(refclkcounter[25])),
             led_att2.eq(~(rlsm)),
-            led_sta1.eq(~(rpclkcounter[25])),
-            led_sta2.eq(~(tpclkcounter[25])),
+            led_sta1.eq(~(rxclkcounter[25])),
+            led_sta2.eq(~(txclkcounter[25])),
             led_err1.eq(~(rlos)),
             led_err2.eq(~(rlol | tlol)),
             led_err3.eq(~(rxde0)),
