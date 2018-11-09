@@ -181,8 +181,8 @@ class LatticePCIeSERDES(Module):
             i_CH0_FFC_LANE_TX_RST=0,
 
             # TX CH ­— output
-            i_CH0_HDOUTP=pins.tx_p,
-            i_CH0_HDOUTN=pins.tx_n,
+            o_CH0_HDOUTP=pins.tx_p,
+            o_CH0_HDOUTN=pins.tx_n,
 
             p_CH0_TXAMPLITUDE="0d1000",     # 1000 mV
             p_CH0_RTERM_TX="0d19",          # 50 Ohm
