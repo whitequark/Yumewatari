@@ -1,9 +1,10 @@
 from migen import *
-from migen.build.generic_platform import *
-from migen.build.platforms.versaecp55g import Platform
 
 
-class PCIePHYx1(Module):
+__all__ = ["LatticePCIeSERDES"]
+
+
+class LatticePCIeSERDES(Module):
     def __init__(self, pins, bypass_8b10b=False):
         self.refclk = Signal() # reference clock
 
@@ -205,69 +206,3 @@ class PCIePHYx1(Module):
         )
         self.dcu0.attr.add(("LOC", "DCU0"))
         self.dcu0.attr.add(("CHAN", "CH0"))
-
-
-class Yumewatari(Module):
-    def __init__(self, **kwargs):
-        self.platform = Platform(**kwargs)
-        self.platform.add_extension([
-             ("tp0", 0, Pins("X3:5"), IOStandard("LVCMOS33")),
-        ])
-
-        self.submodules.phy = phy = PCIePHYx1(self.platform.request("pcie_x1"),
-                                              bypass_8b10b=True)
-        self.comb += [
-            # phy.txd0.eq(0x7C),
-            # phy.txk0.eq(1),
-            phy.txd.eq(0b1111100000)
-        ]
-
-        self.clock_domains.cd_refclk = ClockDomain()
-        self.clock_domains.cd_rx = ClockDomain()
-        self.clock_domains.cd_tx = ClockDomain()
-        self.comb += [
-            self.cd_refclk.clk.eq(phy.refclk),
-            self.cd_rx.clk.eq(phy.rxclk),
-            self.cd_tx.clk.eq(phy.txclk),
-        ]
-
-        refclkcounter = Signal(32)
-        self.sync.refclk += refclkcounter.eq(refclkcounter + 1)
-        rxclkcounter = Signal(32)
-        self.sync.rx += rxclkcounter.eq(rxclkcounter + 1)
-        txclkcounter = Signal(32)
-        self.sync.tx += txclkcounter.eq(txclkcounter + 1)
-
-        led_att1 = self.platform.request("user_led")
-        led_att2 = self.platform.request("user_led")
-        led_sta1 = self.platform.request("user_led")
-        led_sta2 = self.platform.request("user_led")
-        led_err1 = self.platform.request("user_led")
-        led_err2 = self.platform.request("user_led")
-        led_err3 = self.platform.request("user_led")
-        led_err4 = self.platform.request("user_led")
-        self.comb += [
-            led_att1.eq(~(refclkcounter[25])),
-            led_att2.eq(~(phy.rlsm)),
-            led_sta1.eq(~(rxclkcounter[25])),
-            led_sta2.eq(~(txclkcounter[25])),
-            led_err1.eq(~(phy.rlos)),
-            led_err2.eq(~(phy.rlol | phy.tlol)),
-            led_err3.eq(~(0)),#phy.rxde0)),
-            led_err4.eq(~(0)),#phy.rxce0)),
-        ]
-
-        tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(phy.rlsm)
-
-
-if __name__ == "__main__":
-    design = Yumewatari()
-    design.platform.build(design, toolchain_path="/usr/local/diamond/3.10_x64/bin/lin64")
-    import subprocess
-    subprocess.call(["/home/whitequark/Projects/prjtrellis/tools/bit_to_svf.py",
-                     "build/top.bit",
-                     "build/top.svf"])
-    subprocess.call(["openocd",
-                     "-f", "/home/whitequark/Projects/prjtrellis/misc/openocd/ecp5-versa5g.cfg",
-                     "-c", "init; svf build/top.svf; exit"])
