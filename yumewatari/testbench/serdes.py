@@ -5,8 +5,8 @@ from migen.genlib.cdc import MultiReg
 from migen.genlib.fifo import AsyncFIFO
 from migen.genlib.fsm import FSM
 
-from ..serdes import *
-from ..lattice_ecp5 import *
+from ..gateware.serdes import *
+from ..gateware.lattice_ecp5 import *
 from ..vendor.pads import *
 from ..vendor.uart import *
 
@@ -20,8 +20,7 @@ class SERDESTestbench(Module):
 
         self.submodules.serdes = serdes = LatticeECP5PCIeSERDES(self.platform.request("pcie_x1"))
         self.comb += [
-            serdes.lane.tx_control.eq(1),
-            serdes.lane.tx_data.eq(0x7C),
+            serdes.lane.tx_symbol.eq(0x17C),
             serdes.lane.rx_align.eq(1),
         ]
 
@@ -89,8 +88,7 @@ class SERDESTestbench(Module):
             AsyncFIFO(width=16, depth=capture_depth)
         )
         self.comb += [
-            symbols.din.eq(Cat(serdes.lane.rx_data,
-                               serdes.lane.rx_control,
+            symbols.din.eq(Cat(serdes.lane.rx_symbol,
                                serdes.lane.rx_aligned)),
             symbols.we.eq(capture)
         ]
@@ -158,6 +156,7 @@ class SERDESTestbench(Module):
 
 import sys
 import serial
+import subprocess
 
 
 CAPTURE_DEPTH = 1024
@@ -174,7 +173,6 @@ if __name__ == "__main__":
 
             design = SERDESTestbench(CAPTURE_DEPTH, toolchain=toolchain)
             design.platform.build(design, toolchain_path=toolchain_path)
-            import subprocess
             subprocess.call(["/home/whitequark/Projects/prjtrellis/tools/bit_to_svf.py",
                              "build/top.bit",
                              "build/top.svf"])

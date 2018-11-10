@@ -1,5 +1,4 @@
 from migen import *
-from migen.genlib.cdc import *
 
 
 __all__ = ["PCIeSERDESInterface"]
@@ -23,10 +22,8 @@ class PCIeSERDESInterface(Module):
     rx_aligned : Signal
         Asserted if the receiver has aligned to the comma symbol.
 
-    rx_data : Signal(8)
-        8b10b-decoded received symbol.
-    rx_control : Signal
-        Asserted if the received symbol is a control symbol.
+    rx_symbol : Signal(8)
+        8b10b-decoded received symbol, with 9th bit indicating a control symbol.
     rx_valid : Signal
         Asserted if the received symbol has no coding errors. If not asserted, ``rx_data`` and
         ``rx_control`` must be ignored, and may contain symbols that do not exist in 8b10b coding
@@ -35,10 +32,8 @@ class PCIeSERDESInterface(Module):
     tx_locked : Signal
         Asserted if the transmitter is generating a valid clock.
 
-    tx_data : Signal(8)
-        Symbol to 8b10b-encode and transmit.
-    tx_control : Signal
-        Assert if the symbol to transmit is a comma.
+    tx_symbol : Signal(8)
+        Symbol to 8b10b-encode and transmit, with 9th bit indicating a control symbol.
     tx_set_disp : Signal
         Assert to indicate that the 8b10b encoder should choose an encoding with a specific
         running disparity instead of using its state, specified by ``tx_disp``.
@@ -53,11 +48,9 @@ class PCIeSERDESInterface(Module):
         self.rx_locked    = Signal()
         self.rx_aligned   = Signal()
 
-        self.rx_data      = Signal(8)
-        self.rx_control   = Signal()
+        self.rx_symbol    = Signal(9)
         self.rx_valid     = Signal()
 
-        self.tx_data      = Signal(8)
-        self.tx_control   = Signal()
+        self.tx_symbol    = Signal(9)
         self.tx_set_disp  = Signal()
         self.tx_disp      = Signal()

@@ -75,22 +75,21 @@ class LatticeECP5PCIeSERDES(Module):
         ]
 
         self.lane = lane = PCIeSERDESInterface()
-        # In theory, ``rx_bus[9:11]`` has disparity error and coding violation status
-        # signals, but in practice, they appear to be stuck at 1 and 0 respectively.
         self.comb += [
+            rx_inv.eq(lane.rx_invert),
+            rx_det.eq(lane.rx_align),
             lane.rx_present.eq(~rx_los_s),
             lane.rx_locked .eq(~rx_lol_s),
             lane.rx_aligned.eq(rx_lsm_s),
-            lane.rx_data   .eq(self.rx_bus[0:8]),
-            lane.rx_control.eq(self.rx_bus[8]),
-            rx_inv.eq(lane.rx_invert),
-            rx_det.eq(lane.rx_align),
+            lane.rx_symbol.eq(self.rx_bus),
+            # In theory, ``rx_bus[9:11]`` has disparity error and coding violation status
+            # signals, but in practice, they appear to be stuck at 1 and 0 respectively.
+            # However, the 8b10b decoder replaces errors with a "K14.7", which is not a legal
+            # point in 8b10b coding space, so we can use that as an indication.
+            lane.rx_valid.eq(self.rx_bus[:9] != 0x1EE),
         ]
         self.comb += [
-            self.tx_bus[0:8].eq(lane.tx_data),
-            self.tx_bus[ 8].eq(lane.tx_control),
-            self.tx_bus[ 9].eq(lane.tx_set_disp),
-            self.tx_bus[10].eq(lane.tx_disp),
+            self.tx_bus.eq(Cat(lane.tx_symbol, lane.tx_set_disp, lane.tx_disp)),
         ]
 
         self.specials.dcu0 = Instance("DCUA",
