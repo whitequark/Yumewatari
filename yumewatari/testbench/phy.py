@@ -1,7 +1,9 @@
 from migen import *
 from migen.build.generic_platform import *
 from migen.build.platforms.versaecp55g import Platform
+from migen.genlib.io import CRG
 from migen.genlib.cdc import MultiReg
+from microscope import *
 
 from ..gateware.serdes import *
 from ..gateware.phy import *
@@ -21,11 +23,9 @@ class PHYTestbench(Module):
             serdes.lane.rx_align.eq(1),
         ]
 
-        self.clock_domains.cd_ref = ClockDomain()
         self.clock_domains.cd_rx = ClockDomain()
         self.clock_domains.cd_tx = ClockDomain()
         self.comb += [
-            self.cd_ref.clk.eq(serdes.ref_clk),
             serdes.rx_clk_i.eq(serdes.rx_clk_o),
             self.cd_rx.clk.eq(serdes.rx_clk_i),
             serdes.tx_clk_i.eq(serdes.tx_clk_o),
@@ -59,6 +59,10 @@ class PHYTestbench(Module):
 
         tp0 = self.platform.request("tp0")
         self.comb += tp0.eq(phy.fsm.ongoing("TSn-LINK"))
+
+        self.submodules += CRG(serdes.ref_clk)
+        self.submodules += add_probe_record("lane0.rx", "ts", phy.ts)
+        self.submodules += Microscope(self.platform.request("serial"), 99.8e6)
 
 # -------------------------------------------------------------------------------------------------
 
