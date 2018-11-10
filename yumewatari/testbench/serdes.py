@@ -6,7 +6,7 @@ from migen.genlib.fifo import AsyncFIFO
 from migen.genlib.fsm import FSM
 
 from ..gateware.serdes import *
-from ..gateware.lattice_ecp5 import *
+from ..gateware.platform.lattice_ecp5 import *
 from ..vendor.pads import *
 from ..vendor.uart import *
 

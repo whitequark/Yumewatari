@@ -1,7 +1,7 @@
 from migen import *
 from migen.genlib.cdc import *
 
-from .serdes import *
+from ..serdes import *
 
 
 __all__ = ["LatticeECP5PCIeSERDES"]

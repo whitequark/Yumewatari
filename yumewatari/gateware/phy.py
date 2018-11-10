@@ -2,117 +2,162 @@ from migen import *
 from migen.genlib.fsm import *
 
 
-__all__ = ["PCIePHY"]
+__all__ = ["PCIeRXPHY"]
 
 
-K28_5 = 0b1_101_11100
-K23_7 = 0b1_111_10111
-D10_2 = 0b0_010_01010
-D21_5 = 0b0_101_10101
-D05_2 = 0b0_010_00101
-D26_5 = 0b0_101_11010
+def K(x, y): return (1 << 8) | (y << 5) | x
+def D(x, y): return (0 << 8) | (y << 5) | x
 
 
-class PCIePHY(Module):
+_ts_layout = [
+    ("valid",       1),
+    ("link", [
+        ("valid",       1),
+        ("number",      8),
+    ]),
+    ("lane", [
+        ("valid",       1),
+        ("number",      5),
+    ]),
+    ("n_fts",       8),
+    ("rate",  [
+        ("reserved",    1),
+        ("gen1",        1),
+    ]),
+    ("ctrl",  [
+        ("reset",       1),
+        ("disable",     1),
+        ("loopback",    1),
+        ("unscramble",  1)
+    ]),
+    ("ts_id",       1), # 0: TS1, 1: TS2
+]
+
+
+class PCIeRXPHY(Module):
     def __init__(self, lane):
-        self.lane = lane
+        self.ts       = Record(_ts_layout)
+        self.ts_error = Signal()
 
         ###
 
-        rx_link   = Signal(8)
-        rx_lane   = Signal(5)
-        rx_n_fts  = Signal(8)
-        rx_rate   = Signal(8)
-        rx_ctrl   = Record([
-            ("reset",      1),
-            ("disable",    1),
-            ("loopback",   1),
-            ("unscramble", 1)
-        ])
+        self.comb += lane.rx_align.eq(1)
 
-        rx_id_ctr = Signal(max=10)
-        rx_ts_idx = Signal(2) # bit 0: TS1/TS2, bit 1: noninverted/inverted
-        rx_ts_id  = Array([D10_2, D05_2, D21_5, D26_5])[rx_ts_idx]
+        self._tsZ = Record(_ts_layout) # TS being received
+        self._tsY = Record(_ts_layout) # previous TS received
 
-        self.submodules.rx_fsm = ResetInserter()(FSM(reset_state="TSn-COM"))
-        self.comb += self.rx_fsm.reset.eq(~lane.rx_valid)
-        self.rx_fsm.act("TSn-COM",
-            If(lane.rx_symbol == K28_5,
+        id_ctr = Signal(max=10)
+        ts_idx = Signal(2) # bit 0: TS1/TS2, bit 1: noninverted/inverted
+        ts_id  = Array([D(10,2), D(5,2), D(21,5), D(26,5)])[ts_idx]
+
+        self.submodules.fsm = ResetInserter()(FSM(reset_state="IDLE"))
+        self.comb += self.fsm.reset.eq(~lane.rx_valid)
+        self.fsm.act("IDLE",
+            If(lane.rx_symbol == K(28,5),
+                NextValue(self._tsZ.valid, 1),
+                NextValue(self._tsY.raw_bits(), self._tsZ.raw_bits()),
                 NextState("TSn-LINK")
             )
         )
-        self.rx_fsm.act("TSn-LINK",
-            If(lane.rx_symbol == K23_7,
+        self.fsm.act("TSn-LINK",
+            If(lane.rx_symbol == K(23,7),
+                NextValue(self._tsZ.link.valid,  0),
                 NextState("TSn-LANE")
-            ).Elif(~lane.rx_symbol[8:],
-                NextValue(rx_link, lane.rx_symbol),
+            ).Elif(~lane.rx_symbol[8],
+                NextValue(self._tsZ.link.valid,  1),
+                NextValue(self._tsZ.link.number, lane.rx_symbol),
                 NextState("TSn-LANE")
             ).Else(
-                NextState("TSn-COM")
+                self.ts_error.eq(1),
+                NextValue(self._tsZ.valid, 0),
+                NextState("IDLE")
             )
         )
-        self.rx_fsm.act("TSn-LANE",
-            If(lane.rx_symbol == K23_7,
+        self.fsm.act("TSn-LANE",
+            If(lane.rx_symbol == K(23,7),
+                NextValue(self._tsZ.lane.valid,  0),
                 NextState("TSn-FTS")
-            ).Elif(~lane.rx_symbol[4:],
-                NextValue(rx_lane, lane.rx_symbol),
+            ).Elif(~lane.rx_symbol[8],
+                NextValue(self._tsZ.lane.valid,  1),
+                NextValue(self._tsZ.lane.number, lane.rx_symbol),
                 NextState("TSn-FTS")
             ).Else(
-                NextState("TSn-COM")
+                self.ts_error.eq(1),
+                NextValue(self._tsZ.valid, 0),
+                NextState("IDLE")
             )
         )
-        self.rx_fsm.act("TSn-FTS",
-            If(~lane.rx_symbol[8:],
-                NextValue(rx_n_fts, lane.rx_symbol),
+        self.fsm.act("TSn-FTS",
+            If(~lane.rx_symbol[8],
+                NextValue(self._tsZ.n_fts, lane.rx_symbol),
                 NextState("TSn-RATE")
             ).Else(
-                NextState("TSn-COM")
+                self.ts_error.eq(1),
+                NextValue(self._tsZ.valid, 0),
+                NextState("IDLE")
             )
         )
-        self.rx_fsm.act("TSn-RATE",
-            If(~lane.rx_symbol[8:],
-                NextValue(rx_rate, lane.rx_symbol),
+        self.fsm.act("TSn-RATE",
+            If(~lane.rx_symbol[8],
+                NextValue(self._tsZ.rate.raw_bits(), lane.rx_symbol),
                 NextState("TSn-CTRL")
             ).Else(
-                NextState("TSn-COM")
+                self.ts_error.eq(1),
+                NextValue(self._tsZ.valid, 0),
+                NextState("IDLE")
             )
         )
-        self.rx_fsm.act("TSn-CTRL",
-            If(~lane.rx_symbol[8:],
-                NextValue(rx_ctrl.raw_bits(), lane.rx_symbol),
+        self.fsm.act("TSn-CTRL",
+            If(~lane.rx_symbol[8],
+                NextValue(self._tsZ.ctrl.raw_bits(), lane.rx_symbol),
                 NextState("TSn-ID0")
             ).Else(
-                NextState("TSn-COM")
+                self.ts_error.eq(1),
+                NextValue(self._tsZ.valid, 0),
+                NextState("IDLE")
             )
         )
-        self.rx_fsm.act("TSn-ID0",
-            NextValue(rx_id_ctr, 1),
-            If(lane.rx_symbol == D10_2,
-                NextValue(rx_ts_idx, 0),
+        self.fsm.act("TSn-ID0",
+            NextValue(id_ctr, 1),
+            If(lane.rx_symbol == D(10,2),
+                NextValue(ts_idx, 0),
+                NextValue(self._tsZ.ts_id, 0),
                 NextState("TSn-IDn")
-            ).Elif(lane.rx_symbol == D05_2,
-                NextValue(rx_ts_idx, 1),
+            ).Elif(lane.rx_symbol == D(5,2),
+                NextValue(ts_idx, 1),
+                NextValue(self._tsZ.ts_id, 1),
                 NextState("TSn-IDn")
-            ).Elif(lane.rx_symbol == D26_5,
-                NextValue(rx_ts_idx, 2),
+            ).Elif(lane.rx_symbol == D(21,5),
+                NextValue(ts_idx, 2),
+                NextValue(self._tsZ.valid, 0),
                 NextState("TSn-IDn")
-            ).Elif(lane.rx_symbol == D21_5,
-                NextValue(rx_ts_idx, 3),
+            ).Elif(lane.rx_symbol == D(26,5),
+                NextValue(ts_idx, 3),
+                NextValue(self._tsZ.valid, 0),
                 NextState("TSn-IDn")
             ).Else(
-                NextState("TSn-COM")
+                self.ts_error.eq(1),
+                NextValue(self._tsZ.valid, 0),
+                NextState("IDLE")
             )
         )
-        self.rx_fsm.act("TSn-IDn",
-            NextValue(rx_id_ctr, rx_id_ctr + 1),
-            If(lane.rx_symbol == rx_ts_id,
-                If(rx_id_ctr == 9,
-                    NextState("TS-FOUND")
+        self.fsm.act("TSn-IDn",
+            NextValue(id_ctr, id_ctr + 1),
+            If(lane.rx_symbol == ts_id,
+                If(id_ctr == 9,
+                    If(self._tsZ.raw_bits() == self._tsY.raw_bits(),
+                        NextValue(self.ts.raw_bits(), self._tsY.raw_bits())
+                    ).Else(
+                        NextValue(self.ts.valid, 0)
+                    ),
+                    If(ts_idx[1],
+                        NextValue(lane.rx_invert, ~lane.rx_invert)
+                    ),
+                    NextState("IDLE")
                 )
             ).Else(
-                NextState("TSn-COM")
+                self.ts_error.eq(1),
+                NextValue(self._tsZ.valid, 0),
+                NextState("IDLE")
             )
-        )
-        self.rx_fsm.act("TS-FOUND",
-            NextState("TS-FOUND")
         )
