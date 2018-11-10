@@ -2,7 +2,7 @@ from migen import *
 from migen.genlib.fsm import *
 
 
-__all__ = ["PCIeRXPHY"]
+__all__ = ["PCIeRXPHY", "PCIeTXPHY"]
 
 
 def K(x, y): return (1 << 8) | (y << 5) | x
@@ -158,6 +158,62 @@ class PCIeRXPHY(Module):
             ).Else(
                 self.ts_error.eq(1),
                 NextValue(self._tsZ.valid, 0),
+                NextState("IDLE")
+            )
+        )
+
+
+class PCIeTXPHY(Module):
+    def __init__(self, lane):
+        self.ts = Record(_ts_layout)
+
+        ###
+
+        id_ctr = Signal(max=10)
+
+        self.submodules.fsm = ResetInserter()(FSM(reset_state="IDLE"))
+        self.fsm.act("IDLE",
+            lane.tx_set_disp.eq(1),
+            lane.tx_symbol.eq(K(28,5)),
+            NextState("TSn-LINK")
+        )
+        self.fsm.act("TSn-LINK",
+            If(self.ts.link.valid,
+                lane.tx_symbol.eq(self.ts.link.number)
+            ).Else(
+                lane.tx_symbol.eq(K(23,7))
+            ),
+            NextState("TSn-LANE")
+        )
+        self.fsm.act("TSn-LANE",
+            If(self.ts.lane.valid,
+                lane.tx_symbol.eq(self.ts.lane.number)
+            ).Else(
+                lane.tx_symbol.eq(K(23,7))
+            ),
+            NextState("TSn-FTS")
+        )
+        self.fsm.act("TSn-FTS",
+            lane.tx_symbol.eq(self.ts.n_fts),
+            NextState("TSn-RATE")
+        )
+        self.fsm.act("TSn-RATE",
+            lane.tx_symbol.eq(self.ts.rate.raw_bits()),
+            NextState("TSn-CTRL")
+        )
+        self.fsm.act("TSn-CTRL",
+            lane.tx_symbol.eq(self.ts.ctrl.raw_bits()),
+            NextValue(id_ctr, 0),
+            NextState("TSn-IDn")
+        )
+        self.fsm.act("TSn-IDn",
+            NextValue(id_ctr, id_ctr + 1),
+            If(self.ts.ts_id == 0,
+                lane.tx_symbol.eq(D(10,2))
+            ).Else(
+                lane.tx_symbol.eq(D(5,2))
+            ),
+            If(id_ctr == 9,
                 NextState("IDLE")
             )
         )

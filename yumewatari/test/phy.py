@@ -2,7 +2,7 @@ import unittest
 from migen import *
 
 from ..gateware.serdes import *
-from ..gateware.phy import K, D, PCIeRXPHY
+from ..gateware.phy import K, D, PCIeRXPHY, PCIeTXPHY
 from . import simulation_test
 
 
@@ -269,3 +269,83 @@ class PCIeRXPHYTestCase(unittest.TestCase):
             K(28,5)
         ])
         yield from self.assertSignal(tb.phy.ts.valid, 0)
+
+
+class PCIeTXPHYTestbench(Module):
+    def __init__(self):
+        self.submodules.lane = PCIeSERDESInterface()
+        self.submodules.phy  = PCIeTXPHY(self.lane)
+
+    def do_finalize(self):
+        self.states = {v: k for k, v in self.phy.fsm.encoding.items()}
+
+    def phy_state(self):
+        return self.states[(yield self.phy.fsm.state)]
+
+    def receive(self, count):
+        symbols = []
+        for _ in range(count):
+            symbols.append((yield self.lane.tx_symbol))
+            yield
+        return symbols
+
+
+class PCIeTXPHYTestCase(unittest.TestCase):
+    def setUp(self):
+        self.tb = PCIeTXPHYTestbench()
+
+    def assertReceive(self, tb, symbols):
+        self.assertEqual((yield from tb.receive(len(symbols))), symbols)
+
+    @simulation_test
+    def test_tx_ts1_pad(self, tb):
+        yield tb.phy.ts.n_fts.eq(0xff)
+        yield tb.phy.ts.rate.gen1.eq(1)
+        yield from self.assertReceive(tb, [
+            K(28,5), K(23,7), K(23,7), 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
+            K(28,5)
+        ])
+
+    @simulation_test
+    def test_tx_ts1_link(self, tb):
+        yield tb.phy.ts.link.valid.eq(1)
+        yield tb.phy.ts.link.number.eq(0xaa)
+        yield tb.phy.ts.n_fts.eq(0xff)
+        yield tb.phy.ts.rate.gen1.eq(1)
+        yield from self.assertReceive(tb, [
+            K(28,5), 0xaa, K(23,7), 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
+            K(28,5)
+        ])
+
+    @simulation_test
+    def test_tx_ts1_link_lane(self, tb):
+        yield tb.phy.ts.link.valid.eq(1)
+        yield tb.phy.ts.link.number.eq(0xaa)
+        yield tb.phy.ts.lane.valid.eq(1)
+        yield tb.phy.ts.lane.number.eq(0x01)
+        yield tb.phy.ts.n_fts.eq(0xff)
+        yield tb.phy.ts.rate.gen1.eq(1)
+        yield from self.assertReceive(tb, [
+            K(28,5), 0xaa, 0x01, 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
+            K(28,5)
+        ])
+
+    @simulation_test
+    def test_tx_ts1_reset(self, tb):
+        yield tb.phy.ts.n_fts.eq(0xff)
+        yield tb.phy.ts.rate.gen1.eq(1)
+        yield tb.phy.ts.ctrl.reset.eq(1)
+        yield from self.assertReceive(tb, [
+            K(28,5), K(23,7), K(23,7), 0xff, 0b0010, 0b0001, *[D(10,2) for _ in range(10)],
+            K(28,5)
+        ])
+
+    @simulation_test
+    def test_tx_ts2(self, tb):
+        yield tb.phy.ts.n_fts.eq(0xff)
+        yield tb.phy.ts.rate.gen1.eq(1)
+        yield tb.phy.ts.ts_id.eq(1)
+        yield from self.assertReceive(tb, [
+            K(28,5), K(23,7), K(23,7), 0xff, 0b0010, 0b0000, *[D(5,2) for _ in range(10)],
+            K(28,5)
+        ])

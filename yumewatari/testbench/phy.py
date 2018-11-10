@@ -18,10 +18,6 @@ class PHYTestbench(Module):
         ])
 
         self.submodules.serdes = serdes = LatticeECP5PCIeSERDES(self.platform.request("pcie_x1"))
-        self.comb += [
-            serdes.lane.tx_symbol.eq(0x17C),
-            serdes.lane.rx_align.eq(1),
-        ]
 
         self.clock_domains.cd_rx = ClockDomain()
         self.clock_domains.cd_tx = ClockDomain()
@@ -33,10 +29,16 @@ class PHYTestbench(Module):
         ]
 
         self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
-        self.platform.add_platform_command("""FREQUENCY NET "rx_clk_i" 250 MHz;""")
-        self.platform.add_platform_command("""FREQUENCY NET "tx_clk_i" 250 MHz;""")
+        self.platform.add_platform_command("""FREQUENCY NET "rx_clk_o" 250 MHz;""")
+        self.platform.add_platform_command("""FREQUENCY NET "tx_clk_o" 250 MHz;""")
 
-        self.submodules.phy = phy = ClockDomainsRenamer("rx")(PCIeRXPHY(serdes.lane))
+        self.submodules.rx_phy = ClockDomainsRenamer("rx")(PCIeRXPHY(serdes.lane))
+        self.submodules.tx_phy = ClockDomainsRenamer("tx")(PCIeTXPHY(serdes.lane))
+        self.comb += [
+            self.tx_phy.ts.n_fts.eq(0xff),
+            self.tx_phy.ts.rate.gen1.eq(1),
+            # self.tx_phy.ts.ctrl.unscramble.eq(1),
+        ]
 
         led_att1 = self.platform.request("user_led")
         led_att2 = self.platform.request("user_led")
@@ -49,20 +51,23 @@ class PHYTestbench(Module):
         self.comb += [
             led_att1.eq(~(0)),
             led_att2.eq(~(0)),
-            led_sta1.eq(~(phy.ts.valid)),
+            led_sta1.eq(~(self.rx_phy.ts.valid)),
             led_sta2.eq(~(0)),
             led_err1.eq(~(~serdes.lane.rx_present)),
             led_err2.eq(~(~serdes.lane.rx_locked)),
             led_err3.eq(~(~serdes.lane.rx_aligned)),
-            led_err4.eq(~(phy.ts_error)),
+            led_err4.eq(~(self.rx_phy.ts_error)),
         ]
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(phy.fsm.ongoing("TSn-LINK"))
+        self.comb += tp0.eq(self.rx_phy._tsY.link.valid)
 
         self.submodules += CRG(serdes.ref_clk)
-        self.submodules += add_probe_record("lane0.rx", "ts", phy.ts)
-        self.submodules += Microscope(self.platform.request("serial"), 99.8e6)
+        # self.submodules += add_probe_record("lane0.rx", "ts", self.rx_phy.ts,
+        #                                     clock_domain="rx")
+        # self.submodules += add_probe_buffer("lane0.rx", "symbol", serdes.lane.rx_symbol,
+        #                                     clock_domain="rx")
+        self.submodules += Microscope(self.platform.request("serial"), 100e6)
 
 # -------------------------------------------------------------------------------------------------
 
