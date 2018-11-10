@@ -6,6 +6,7 @@ from migen.genlib.fifo import AsyncFIFO
 from migen.genlib.fsm import FSM
 
 from ..serdes import *
+from ..lattice_ecp5 import *
 from ..vendor.pads import *
 from ..vendor.uart import *
 
@@ -17,28 +18,27 @@ class SERDESTestbench(Module):
              ("tp0", 0, Pins("X3:5"), IOStandard("LVCMOS33")),
         ])
 
-        self.submodules.serdes = serdes = \
-            LatticePCIeSERDES(self.platform.request("pcie_x1"),
-                              bypass_8b10b=False)
+        self.submodules.serdes = serdes = LatticeECP5PCIeSERDES(self.platform.request("pcie_x1"))
         self.comb += [
-            serdes.txd.eq(0x7C),
-            serdes.txk.eq(1),
-            serdes.rxdet.eq(1),
-            serdes.rxinv.eq(0),
+            serdes.lane.tx_control.eq(1),
+            serdes.lane.tx_data.eq(0x7C),
+            serdes.lane.rx_align.eq(1),
         ]
 
         self.clock_domains.cd_ref = ClockDomain()
         self.clock_domains.cd_rx = ClockDomain()
         self.clock_domains.cd_tx = ClockDomain()
         self.comb += [
-            self.cd_ref.clk.eq(serdes.refclk),
-            self.cd_rx.clk.eq(serdes.rxclk),
-            self.cd_tx.clk.eq(serdes.txclk),
+            self.cd_ref.clk.eq(serdes.ref_clk),
+            serdes.rx_clk_i.eq(serdes.rx_clk_o),
+            self.cd_rx.clk.eq(serdes.rx_clk_i),
+            serdes.tx_clk_i.eq(serdes.tx_clk_o),
+            self.cd_tx.clk.eq(serdes.tx_clk_i),
         ]
 
-        self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
-        self.platform.add_platform_command("""FREQUENCY NET "rx_clk" 250 MHz;""")
-        self.platform.add_platform_command("""FREQUENCY NET "tx_clk" 250 MHz;""")
+        # self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
+        # self.platform.add_platform_command("""FREQUENCY NET "rx_clk" 250 MHz;""")
+        # self.platform.add_platform_command("""FREQUENCY NET "tx_clk" 250 MHz;""")
 
         refclkcounter = Signal(32)
         self.sync.ref += refclkcounter.eq(refclkcounter + 1)
@@ -57,13 +57,13 @@ class SERDESTestbench(Module):
         led_err4 = self.platform.request("user_led")
         self.comb += [
             led_att1.eq(~(refclkcounter[25])),
-            led_att2.eq(~(serdes.rlsm)),
+            led_att2.eq(~(0)),
             led_sta1.eq(~(rxclkcounter[25])),
             led_sta2.eq(~(txclkcounter[25])),
-            led_err1.eq(~(serdes.rlos)),
-            led_err2.eq(~(serdes.rlol | serdes.tlol)),
-            led_err3.eq(~(0)),#serdes.rxde0)),
-            led_err4.eq(~(0)),#serdes.rxce0)),
+            led_err1.eq(~(~serdes.lane.rx_present)),
+            led_err2.eq(~(~serdes.lane.rx_locked)),
+            led_err3.eq(~(~serdes.lane.rx_aligned)),
+            led_err4.eq(~(0)),
         ]
 
         self.clock_domains.cd_por = ClockDomain(reset_less=True)
@@ -89,7 +89,9 @@ class SERDESTestbench(Module):
             AsyncFIFO(width=16, depth=capture_depth)
         )
         self.comb += [
-            symbols.din.eq(Cat(serdes.rxd, serdes.rxk, serdes.rlsm)),
+            symbols.din.eq(Cat(serdes.lane.rx_data,
+                               serdes.lane.rx_control,
+                               serdes.lane.rx_aligned)),
             symbols.we.eq(capture)
         ]
         self.sync.rx += [
