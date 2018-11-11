@@ -35,9 +35,9 @@ class SERDESTestbench(Module):
             self.cd_tx.clk.eq(serdes.tx_clk_i),
         ]
 
-        # self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
-        # self.platform.add_platform_command("""FREQUENCY NET "rx_clk" 250 MHz;""")
-        # self.platform.add_platform_command("""FREQUENCY NET "tx_clk" 250 MHz;""")
+        self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
+        self.platform.add_platform_command("""FREQUENCY NET "rx_clk" 250 MHz;""")
+        self.platform.add_platform_command("""FREQUENCY NET "tx_clk" 250 MHz;""")
 
         refclkcounter = Signal(32)
         self.sync.ref += refclkcounter.eq(refclkcounter + 1)
@@ -85,11 +85,10 @@ class SERDESTestbench(Module):
         self.submodules.symbols = symbols = ClockDomainsRenamer({
             "write": "rx", "read": "ref"
         })(
-            AsyncFIFO(width=16, depth=capture_depth)
+            AsyncFIFO(width=18, depth=capture_depth)
         )
         self.comb += [
-            symbols.din.eq(Cat(serdes.lane.rx_symbol,
-                               serdes.lane.rx_aligned)),
+            symbols.din.eq(Cat(serdes.lane.rx_symbol)),
             symbols.we.eq(capture)
         ]
         self.sync.rx += [
@@ -128,29 +127,36 @@ class SERDESTestbench(Module):
             If(uart.tx_rdy,
                 uart.tx_ack.eq(1),
                 uart.tx_data.eq(0xff),
-                NextState("HIGH")
+                NextState("BYTE-0")
             )
         )
-        self.fsm.act("HIGH",
+        self.fsm.act("BYTE-0",
             If(symbols.readable & uart.tx_rdy,
                 uart.tx_ack.eq(1),
-                uart.tx_data.eq(symbols.dout[8:]),
-                NextState("LOW")
+                uart.tx_data.eq(symbols.dout[16:]),
+                NextState("BYTE-1")
             ).Elif(~symbols.readable,
                 NextState("WAIT")
             )
         )
-        self.fsm.act("LOW",
+        self.fsm.act("BYTE-1",
             If(symbols.readable & uart.tx_rdy,
                 uart.tx_ack.eq(1),
-                uart.tx_data.eq(symbols.dout[:8]),
+                uart.tx_data.eq(symbols.dout[8:]),
+                NextState("BYTE-2")
+            )
+        )
+        self.fsm.act("BYTE-2",
+            If(symbols.readable & uart.tx_rdy,
+                uart.tx_ack.eq(1),
+                uart.tx_data.eq(symbols.dout[0:]),
                 symbols.re.eq(1),
-                NextState("HIGH")
+                NextState("BYTE-0")
             )
         )
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(capture)
+        self.comb += tp0.eq(serdes.rx_clk_o)
 
 # -------------------------------------------------------------------------------------------------
 
@@ -191,18 +197,15 @@ if __name__ == "__main__":
                 if port.read(1) == b"\xff": break
 
             for x in range(CAPTURE_DEPTH):
-                hi, lo = port.read(2)
-                word = (hi << 8) | lo
-                if word & 0x1ff == 0x1ee:
-                    print("{}KEEEEEEEE".format(
-                        "L" if word & (1 <<  9) else " ",
-                    ), end=" ")
-                else:
-                    print("{}{}{:08b}".format(
-                        "L" if word & (1 <<  9) else " ",
-                        "K" if word & (1 <<  8) else " ",
-                        word & 0xff,
-                    ), end=" ")
-                # print("".join(reversed("{:010b}".format(word & 3ff)), end=" ")
-                if x % 8 == 7:
+                b2, b1, b0 = port.read(3)
+                dword = (b2 << 16) | (b1 << 8) | b0
+                for word in (((dword >> 0) & 0x1ff), ((dword >> 9) & 0x1ff)):
+                    if word & 0x1ff == 0x1ee:
+                        print("KEEEEEEEE", end=" ")
+                    else:
+                        print("{}{:08b}".format(
+                            "K" if word & (1 << 8) else " ",
+                            word & 0xff,
+                        ), end=" ")
+                if x % 4 == 3:
                     print()
