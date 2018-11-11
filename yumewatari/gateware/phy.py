@@ -48,7 +48,7 @@ class PCIeRXPHY(Module):
 
         id_ctr = Signal(max=10)
         ts_idx = Signal(2) # bit 0: TS1/TS2, bit 1: noninverted/inverted
-        ts_id  = Array([D(10,2), D(5,2), D(21,5), D(26,5)])[ts_idx]
+        ts_id  = Signal(9)
 
         self.submodules.fsm = ResetInserter()(FSM(reset_state="IDLE"))
         self.comb += self.fsm.reset.eq(~lane.rx_valid)
@@ -119,6 +119,7 @@ class PCIeRXPHY(Module):
         )
         self.fsm.act("TSn-ID0",
             NextValue(id_ctr, 1),
+            NextValue(ts_id, lane.rx_symbol),
             If(lane.rx_symbol == D(10,2),
                 NextValue(ts_idx, 0),
                 NextValue(self._tsZ.ts_id, 0),
