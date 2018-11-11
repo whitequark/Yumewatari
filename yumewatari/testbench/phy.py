@@ -17,20 +17,20 @@ class PHYTestbench(Module):
              ("tp0", 0, Pins("X3:5"), IOStandard("LVCMOS33")),
         ])
 
+        self.clock_domains.cd_serdes = ClockDomain()
         self.submodules.serdes = serdes = LatticeECP5PCIeSERDES(self.platform.request("pcie_x1"))
-
-        self.clock_domains.cd_rx = ClockDomain()
-        self.clock_domains.cd_tx = ClockDomain()
         self.comb += [
-            serdes.rx_clk_i.eq(serdes.rx_clk_o),
-            self.cd_rx.clk.eq(serdes.rx_clk_i),
-            serdes.tx_clk_i.eq(serdes.tx_clk_o),
-            self.cd_tx.clk.eq(serdes.tx_clk_i),
+            self.cd_serdes.clk.eq(serdes.rx_clk_o),
+            serdes.rx_clk_i.eq(self.cd_serdes.clk),
+            serdes.tx_clk_i.eq(self.cd_serdes.clk),
         ]
 
         self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
         self.platform.add_platform_command("""FREQUENCY NET "rx_clk_o" 250 MHz;""")
-        self.platform.add_platform_command("""FREQUENCY NET "tx_clk_o" 250 MHz;""")
+        with open("top.sdc", "w") as f:
+            f.write("define_clock -name {n:ref_clk} -freq 100.000\n")
+            f.write("define_clock -name {n:rx_clk_o} -freq 250.000\n")
+        self.platform.add_source("top.sdc")
 
         self.submodules.rx_phy = ClockDomainsRenamer("rx")(PCIeRXPHY(serdes.lane))
         self.submodules.tx_phy = ClockDomainsRenamer("tx")(PCIeTXPHY(serdes.lane))
@@ -60,14 +60,7 @@ class PHYTestbench(Module):
         ]
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(self.rx_phy._tsY.link.valid)
-
-        self.submodules += CRG(serdes.ref_clk)
-        # self.submodules += add_probe_record("lane0.rx", "ts", self.rx_phy.ts,
-        #                                     clock_domain="rx")
-        # self.submodules += add_probe_buffer("lane0.rx", "symbol", serdes.lane.rx_symbol,
-        #                                     clock_domain="rx")
-        self.submodules += Microscope(self.platform.request("serial"), 100e6)
+        self.comb += tp0.eq(self.rx_phy.ts.valid)
 
 # -------------------------------------------------------------------------------------------------
 
