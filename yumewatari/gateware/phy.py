@@ -60,12 +60,12 @@ class PCIeRXPHY(Module):
             )
         )
         self.fsm.act("TSn-LINK",
+            NextValue(self._tsZ.link.number, lane.rx_symbol),
             If(lane.rx_symbol == K(23,7),
                 NextValue(self._tsZ.link.valid,  0),
                 NextState("TSn-LANE")
             ).Elif(~lane.rx_symbol[8],
                 NextValue(self._tsZ.link.valid,  1),
-                NextValue(self._tsZ.link.number, lane.rx_symbol),
                 NextState("TSn-LANE")
             ).Else(
                 self.ts_error.eq(1),
@@ -74,12 +74,12 @@ class PCIeRXPHY(Module):
             )
         )
         self.fsm.act("TSn-LANE",
+            NextValue(self._tsZ.lane.number, lane.rx_symbol),
             If(lane.rx_symbol == K(23,7),
                 NextValue(self._tsZ.lane.valid,  0),
                 NextState("TSn-FTS")
             ).Elif(~lane.rx_symbol[8],
                 NextValue(self._tsZ.lane.valid,  1),
-                NextValue(self._tsZ.lane.number, lane.rx_symbol),
                 NextState("TSn-FTS")
             ).Else(
                 self.ts_error.eq(1),
@@ -88,8 +88,8 @@ class PCIeRXPHY(Module):
             )
         )
         self.fsm.act("TSn-FTS",
+            NextValue(self._tsZ.n_fts, lane.rx_symbol),
             If(~lane.rx_symbol[8],
-                NextValue(self._tsZ.n_fts, lane.rx_symbol),
                 NextState("TSn-RATE")
             ).Else(
                 self.ts_error.eq(1),
@@ -98,8 +98,8 @@ class PCIeRXPHY(Module):
             )
         )
         self.fsm.act("TSn-RATE",
+            NextValue(self._tsZ.rate.raw_bits(), lane.rx_symbol),
             If(~lane.rx_symbol[8],
-                NextValue(self._tsZ.rate.raw_bits(), lane.rx_symbol),
                 NextState("TSn-CTRL")
             ).Else(
                 self.ts_error.eq(1),
@@ -108,8 +108,8 @@ class PCIeRXPHY(Module):
             )
         )
         self.fsm.act("TSn-CTRL",
+            NextValue(self._tsZ.ctrl.raw_bits(), lane.rx_symbol),
             If(~lane.rx_symbol[8],
-                NextValue(self._tsZ.ctrl.raw_bits(), lane.rx_symbol),
                 NextState("TSn-ID0")
             ).Else(
                 self.ts_error.eq(1),
