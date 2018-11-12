@@ -32,7 +32,6 @@ class PHYTestbench(Module):
             f.write("define_clock -name {n:serdes_ref_clk} -freq 100.000\n")
             f.write("define_clock -name {n:serdes_rx_clk_o} -freq 150.000\n")
         self.platform.add_source("top.sdc")
-
         self.platform.add_platform_command("""FREQUENCY NET "serdes_ref_clk" 100 MHz;""")
         self.platform.add_platform_command("""FREQUENCY NET "serdes_rx_clk_o" 125 MHz;""")
 
@@ -41,7 +40,6 @@ class PHYTestbench(Module):
         self.comb += [
             self.tx_phy.ts.n_fts.eq(0xff),
             self.tx_phy.ts.rate.gen1.eq(1),
-            # self.tx_phy.ts.ctrl.unscramble.eq(1),
         ]
 
         led_att1 = self.platform.request("user_led")
@@ -53,8 +51,8 @@ class PHYTestbench(Module):
         led_err3 = self.platform.request("user_led")
         led_err4 = self.platform.request("user_led")
         self.comb += [
-            led_att1.eq(~(0)),
-            led_att2.eq(~(0)),
+            led_att1.eq(~(self.rx_phy.ts.link.valid)),
+            led_att2.eq(~(self.rx_phy.ts.lane.valid)),
             led_sta1.eq(~(self.rx_phy.ts.valid)),
             led_sta2.eq(~(0)),
             led_err1.eq(~(~serdes.lane.rx_present)),
@@ -64,11 +62,12 @@ class PHYTestbench(Module):
         ]
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(self.rx_phy.ts.valid)
+        self.comb += tp0.eq(self.rx_phy.ts.link.valid)
 
-        self.submodules += CRG(serdes.ref_clk)
-        self.submodules += add_probe_record("lane0.rx", "ts", self.rx_phy.ts, clock_domain="rx")
-        self.submodules += Microscope(self.platform.request("serial"), 99.8e6)
+        # self.submodules += CRG(serdes.ref_clk)
+        # self.submodules += add_probe_single("lane0.rx", "ts",
+        #                                     self.rx_phy.ts.raw_bits(), clock_domain="rx")
+        # self.submodules += Microscope(self.platform.request("serial"), 99.8e6)
 
 # -------------------------------------------------------------------------------------------------
 

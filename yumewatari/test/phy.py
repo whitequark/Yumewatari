@@ -6,14 +6,6 @@ from ..gateware.phy import K, D, PCIeRXPHY, PCIeTXPHY
 from . import simulation_test
 
 
-class _PHYTestCase(unittest.TestCase):
-    def assertState(self, tb, state):
-        self.assertEqual((yield from tb.phy_state()), state)
-
-    def assertSignal(self, signal, value):
-        self.assertEqual((yield signal), value)
-
-
 class PCIeRXPHYTestbench(Module):
     def __init__(self, ratio=1):
         self.submodules.lane = PCIeSERDESInterface(ratio)
@@ -37,7 +29,15 @@ class PCIeRXPHYTestbench(Module):
             yield
 
 
-class PCIeRXPHYTestCase(_PHYTestCase):
+class _PCIeRXPHYTestCase(unittest.TestCase):
+    def assertState(self, tb, state):
+        self.assertEqual((yield from tb.phy_state()), state)
+
+    def assertSignal(self, signal, value):
+        self.assertEqual((yield signal), value)
+
+
+class PCIeRXPHYGear1xTestCase(_PCIeRXPHYTestCase):
     def setUp(self):
         self.tb = PCIeRXPHYTestbench()
 
@@ -299,7 +299,7 @@ class PCIeRXPHYTestCase(_PHYTestCase):
         yield from self.assertSignal(tb.phy.ts.valid, 1)
 
 
-class PCIeRXPHYGear2xTestCase(_PHYTestCase):
+class PCIeRXPHYGear2xTestCase(_PCIeRXPHYTestCase):
     def setUp(self):
         self.tb = PCIeRXPHYTestbench(ratio=2)
 
@@ -319,25 +319,35 @@ class PCIeRXPHYGear2xTestCase(_PHYTestCase):
 
 
 class PCIeTXPHYTestbench(Module):
-    def __init__(self):
-        self.submodules.lane = PCIeSERDESInterface()
+    def __init__(self, ratio=1):
+        self.submodules.lane = PCIeSERDESInterface(ratio)
         self.submodules.phy  = PCIeTXPHY(self.lane)
 
     def do_finalize(self):
-        self.states = {v: k for k, v in self.phy.fsm.encoding.items()}
+        self.states = {v: k for k, v in self.phy.emitter.fsm.encoding.items()}
 
     def phy_state(self):
-        return self.states[(yield self.phy.fsm.state)]
+        return self.states[(yield self.phy.emitter.fsm.state)]
 
     def receive(self, count):
         symbols = []
         for _ in range(count):
-            symbols.append((yield self.lane.tx_symbol))
+            word = yield self.lane.tx_symbol
+            if self.lane.ratio == 1:
+                symbols.append(word)
+            else:
+                symbols.append(tuple((word >> (9 * n)) & 0x1ff
+                                     for n in range(self.lane.ratio)))
             yield
         return symbols
 
 
-class PCIeTXPHYTestCase(_PHYTestCase):
+class _PCIeTXPHYTestCase(unittest.TestCase):
+    def assertReceive(self, tb, symbols):
+        self.assertEqual((yield from tb.receive(len(symbols))), symbols)
+
+
+class PCIeTXPHYGear1xTestCase(_PCIeTXPHYTestCase):
     def setUp(self):
         self.tb = PCIeTXPHYTestbench()
 
@@ -395,4 +405,24 @@ class PCIeTXPHYTestCase(_PHYTestCase):
         yield from self.assertReceive(tb, [
             K(28,5), K(23,7), K(23,7), 0xff, 0b0010, 0b0000, *[D(5,2) for _ in range(10)],
             K(28,5)
+        ])
+
+
+class PCIeTXPHYGear2xTestCase(_PCIeTXPHYTestCase):
+    def setUp(self):
+        self.tb = PCIeTXPHYTestbench(ratio=2)
+
+    @simulation_test
+    def test_tx_ts1_link_lane(self, tb):
+        yield tb.phy.ts.link.valid.eq(1)
+        yield tb.phy.ts.link.number.eq(0xaa)
+        yield tb.phy.ts.lane.valid.eq(1)
+        yield tb.phy.ts.lane.number.eq(0x01)
+        yield tb.phy.ts.n_fts.eq(0xff)
+        yield tb.phy.ts.rate.gen1.eq(1)
+        yield from self.assertReceive(tb, [
+            (K(28,5), K(23,7)), (0x01, 0xff), (0b0010, 0b0000),
+                *[(D(10,2), D(10,2)) for _ in range(5)],
+            (K(28,5), 0xaa), (0x01, 0xff), (0b0010, 0b0000),
+                *[(D(10,2), D(10,2)) for _ in range(5)],
         ])

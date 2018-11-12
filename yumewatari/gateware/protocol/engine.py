@@ -1,14 +1,7 @@
-import os
-from collections import defaultdict, namedtuple
+from collections import namedtuple, defaultdict
 from migen import *
 from migen.fhdl.structure import _Value, _Statement
 from migen.genlib.fsm import _LowerNext, FSM
-
-
-__all__ = ["Parser", "Memory", "NextMemory"]
-
-
-_DEBUG = os.getenv("DEBUG_PARSER")
 
 
 class Memory(_Value):
@@ -49,7 +42,7 @@ class _LowerMemory(_LowerNext):
             return super().visit_unknown(node)
 
 
-class _ParserFSM(FSM):
+class _ProtocolFSM(FSM):
     def _lower_controls(self):
         return _LowerMemory(self.next_state, self.encoding, self.state_aliases)
 
@@ -62,21 +55,15 @@ class _ParserFSM(FSM):
 _Rule = namedtuple("_Rule", ("name", "cond", "succ", "action"))
 
 
-class Parser(Module):
+class _ProtocolEngine(Module):
     def __init__(self, symbol_size, word_size, reset_rule):
-        self.reset = Signal()
-        self.error = Signal()
-        self.i     = Signal(symbol_size * word_size)
-
-        ###
-
         self._symbol_size = symbol_size
         self._word_size   = word_size
         self._reset_rule  = reset_rule
         # name -> [(cond, succ, action)]
         self._grammar = defaultdict(lambda: [])
 
-    def rule(self, name, cond, succ, action=lambda symbol: []):
+    def rule(self, name, succ, cond=lambda *_: True, action=lambda symbol: []):
         self._grammar[name].append(_Rule(name, cond, succ, action))
 
     def _get_rule_tuples(self, rule_name, rule_tuples, rule_path=()):
@@ -86,54 +73,3 @@ class Parser(Module):
 
         for rule in self._grammar[rule_name]:
             self._get_rule_tuples(rule.succ, rule_tuples, rule_path + (rule,))
-
-    def do_finalize(self):
-        self.submodules.fsm = ResetInserter()(_ParserFSM())
-        self.comb += self.fsm.reset.eq(self.reset | self.error)
-
-        if _DEBUG:
-            print("Parser layout:")
-        worklist  = {self._reset_rule}
-        processed = set()
-        while worklist:
-            rule_name = worklist.pop()
-            processed.add(rule_name)
-
-            if _DEBUG:
-                print("  State %s" % rule_name)
-
-            rule_tuples = set()
-            self._get_rule_tuples(rule_name, rule_tuples)
-
-            conds   = []
-            actions = []
-            for i, rule_tuple in enumerate(rule_tuples):
-                if _DEBUG:
-                    print("    Input #%d %s -> %s" %
-                          (i, rule_name, " -> ".join(rule.succ for rule in rule_tuple)))
-
-                succ = rule_tuple[-1].succ
-                cond   = 1
-                action = [
-                    self.error.eq(0),
-                    NextState(succ)
-                ]
-                for j, rule in enumerate(reversed(rule_tuple)):
-                    symbol = self.i.part((self._word_size - j - 1) * self._symbol_size,
-                                         self._symbol_size)
-                    action = [
-                        If(rule.cond(symbol),
-                            rule.action(symbol),
-                            *action
-                        ),
-                    ]
-
-                conds.append(cond)
-                actions.append(action)
-                if succ not in processed:
-                    worklist.add(succ)
-
-            self.fsm.act(rule_name, [
-                self.error.eq(1),
-                *actions
-            ])

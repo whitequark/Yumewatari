@@ -6,7 +6,7 @@ from migen.genlib.fifo import AsyncFIFO
 from migen.genlib.fsm import FSM
 
 from ..gateware.serdes import *
-from ..gateware.phy import K
+from ..gateware.phy import K, PCIeTXPHY
 from ..gateware.align import *
 from ..gateware.platform.lattice_ecp5 import *
 from ..vendor.pads import *
@@ -26,23 +26,31 @@ class SERDESTestbench(Module):
 
         self.submodules.serdes = serdes = \
             LatticeECP5PCIeSERDES(self.platform.request("pcie_x1"))
+        self.submodules.aligner = aligner = \
+            ClockDomainsRenamer("rx")(PCIeSERDESAligner(serdes.lane))
         self.comb += [
             self.cd_ref.clk.eq(serdes.ref_clk),
             serdes.rx_clk_i.eq(serdes.rx_clk_o),
             self.cd_rx.clk.eq(serdes.rx_clk_i),
             serdes.tx_clk_i.eq(serdes.tx_clk_o),
             self.cd_tx.clk.eq(serdes.tx_clk_i),
-
-            serdes.lane.tx_symbol.eq(0x17C),
-            serdes.lane.rx_align.eq(1),
         ]
 
-        self.submodules.aligner = aligner = \
-            ClockDomainsRenamer("rx")(PCIeSERDESAligner(serdes.lane))
+        self.submodules.tx_phy = ClockDomainsRenamer("tx")(PCIeTXPHY(aligner))
+        self.comb += [
+            self.aligner.rx_align.eq(1),
+            self.tx_phy.ts.n_fts.eq(0xff),
+            self.tx_phy.ts.rate.gen1.eq(1),
+        ]
 
-        self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
-        self.platform.add_platform_command("""FREQUENCY NET "rx_clk" 250 MHz;""")
-        self.platform.add_platform_command("""FREQUENCY NET "tx_clk" 250 MHz;""")
+        with open("top.sdc", "w") as f:
+            f.write("define_clock -name {n:serdes_ref_clk} -freq 100.000\n")
+            f.write("define_clock -name {n:serdes_tx_clk_o} -freq 150.000\n")
+            f.write("define_clock -name {n:serdes_rx_clk_o} -freq 150.000\n")
+        self.platform.add_source("top.sdc")
+        self.platform.add_platform_command("""FREQUENCY NET "serdes_ref_clk" 100 MHz;""")
+        self.platform.add_platform_command("""FREQUENCY NET "serdes_rx_clk_o" 125 MHz;""")
+        self.platform.add_platform_command("""FREQUENCY NET "serdes_tx_clk_o" 125 MHz;""")
 
         refclkcounter = Signal(32)
         self.sync.ref += refclkcounter.eq(refclkcounter + 1)
@@ -149,7 +157,7 @@ class SERDESTestbench(Module):
         )
 
         tp0 = self.platform.request("tp0")
-        self.comb += tp0.eq(serdes.rx_clk_o)
+        # self.comb += tp0.eq(serdes.rx_clk_o)
 
 # -------------------------------------------------------------------------------------------------
 
@@ -164,7 +172,7 @@ CAPTURE_DEPTH = 1024
 if __name__ == "__main__":
     for arg in sys.argv[1:]:
         if arg == "run":
-            toolchain = "trellis"
+            toolchain = "diamond"
             if toolchain == "trellis":
                 toolchain_path = "/usr/local/share/trellis"
             elif toolchain == "diamond":
