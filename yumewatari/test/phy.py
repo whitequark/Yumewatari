@@ -19,7 +19,7 @@ class PCIeRXPHYTestbench(Module):
 
     def transmit(self, symbols):
         for symbol in symbols:
-            assert (yield self.phy.ts_error) == 0
+            assert (yield self.phy.error) == 0
             yield self.lane.rx_symbol.eq(symbol)
             yield
 
@@ -44,7 +44,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.assertState(tb, "COMMA")
         yield tb.lane.rx_symbol.eq(D(1,0))
         yield
-        yield from self.assertState(tb, "TSn-LINK")
+        yield from self.assertState(tb, "TSn-LINK/SKP-0")
         yield tb.lane.rx_symbol.eq(D(2,0))
         yield
         yield from self.assertSignal(tb.phy._tsZ.link.valid, 1)
@@ -98,8 +98,8 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.assertSignal(tsN.ctrl.unscramble, ctrl_unscramble)
         yield from self.assertSignal(tsN.ts_id,           ts_id)
 
-    def assertTSError(self, tb):
-        yield from self.assertSignal(tb.phy.ts_error, 1)
+    def assertError(self, tb):
+        yield from self.assertSignal(tb.phy.error, 1)
         yield
         yield from self.assertSignal(tb.phy._tsZ.valid, 0)
         yield from self.assertState(tb, "COMMA")
@@ -152,7 +152,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.tb.transmit([
             K(28,5), 0x1ee,
         ])
-        yield from self.assertTSError(tb)
+        yield from self.assertError(tb)
 
     @simulation_test
     def test_rx_ts1_lane_valid(self, tb):
@@ -169,7 +169,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.tb.transmit([
             K(28,5), K(23,7), 0x1ee,
         ])
-        yield from self.assertTSError(tb)
+        yield from self.assertError(tb)
 
     @simulation_test
     def test_rx_ts1_n_fts_valid(self, tb):
@@ -187,7 +187,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.tb.transmit([
             K(28,5), K(23,7), K(23,7), 0x1ee
         ])
-        yield from self.assertTSError(tb)
+        yield from self.assertError(tb)
 
     @simulation_test
     def test_rx_ts1_n_rate_valid(self, tb):
@@ -206,7 +206,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.tb.transmit([
             K(28,5), K(23,7), K(23,7), 0xff, 0x1ee
         ])
-        yield from self.assertTSError(tb)
+        yield from self.assertError(tb)
 
     @simulation_test
     def test_rx_ts1_ctrl_valid(self, tb):
@@ -232,7 +232,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.tb.transmit([
             K(28,5), K(23,7), K(23,7), 0xff, 0b0010, 0x1ee
         ])
-        yield from self.assertTSError(tb)
+        yield from self.assertError(tb)
 
     @simulation_test
     def test_rx_ts1_idN_invalid(self, tb):
@@ -240,7 +240,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
             yield from self.tb.transmit([
                 K(28,5), 0xaa, 0x1a, 0xff, 0b0010, 0b0001, *[D(10,2) for _ in range(n)], 0x1ee
             ])
-            yield from self.assertTSError(tb)
+            yield from self.assertError(tb)
 
     @simulation_test
     def test_rx_ts1_2x_same_valid(self, tb):
@@ -269,6 +269,26 @@ class PCIeRXPHYTestCase(unittest.TestCase):
             K(28,5)
         ])
         yield from self.assertSignal(tb.phy.ts.valid, 0)
+
+    @simulation_test
+    def test_rx_ts1_3x_same_different_invalid(self, tb):
+        yield from self.tb.transmit([
+            K(28,5), 0xaa, 0x1a, 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
+            K(28,5), 0xaa, 0x1a, 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
+            K(28,5), 0xaa, 0x1a, 0xff, 0b0010, 0b0001, *[D(10,2) for _ in range(10)],
+            K(28,5)
+        ])
+        yield from self.assertSignal(tb.phy.ts.valid, 0)
+
+    @simulation_test
+    def test_rx_ts1_skp_ts1_valid(self, tb):
+        yield from self.tb.transmit([
+            K(28,5), 0xaa, 0x1a, 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
+            K(28,5), K(28,0), K(28,0), K(28,0),
+            K(28,5), 0xaa, 0x1a, 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
+            K(28,5)
+        ])
+        yield from self.assertSignal(tb.phy.ts.valid, 1)
 
 
 class PCIeTXPHYTestbench(Module):
