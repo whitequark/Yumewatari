@@ -38,10 +38,7 @@ class SERDESTestbench(Module):
         ]
 
         self.submodules.aligner = aligner = \
-            ClockDomainsRenamer("rx")(SymbolSlip(symbol_size=9, word_size=2, comma=K(28,5)))
-        self.comb += [
-            aligner.i.eq(serdes.lane.rx_symbol),
-        ]
+            ClockDomainsRenamer("rx")(PCIeSERDESAligner(serdes.lane))
 
         self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
         self.platform.add_platform_command("""FREQUENCY NET "rx_clk" 250 MHz;""")
@@ -84,7 +81,7 @@ class SERDESTestbench(Module):
             AsyncFIFO(width=18, depth=capture_depth)
         )
         self.comb += [
-            symbols.din.eq(Cat(aligner.o)),
+            symbols.din.eq(Cat(aligner.rx_symbol)),
             symbols.we.eq(capture)
         ]
         self.sync.rx += [

@@ -1,7 +1,13 @@
 from migen import *
 
+from .align import SymbolSlip
 
-__all__ = ["PCIeSERDESInterface"]
+
+__all__ = ["PCIeSERDESInterface", "PCIeSERDESAligner"]
+
+
+def K(x, y): return (1 << 8) | (y << 5) | x
+def D(x, y): return (0 << 8) | (y << 5) | x
 
 
 class PCIeSERDESInterface(Module):
@@ -62,3 +68,46 @@ class PCIeSERDESInterface(Module):
         self.tx_set_disp  = Signal(ratio)
         self.tx_disp      = Signal(ratio)
         self.tx_e_idle    = Signal(ratio)
+
+
+class PCIeSERDESAligner(PCIeSERDESInterface):
+    """
+    A multiplexer that aligns commas to the first symbol of the word, for SERDESes that only
+    perform bit alignment and not symbol alignment.
+    """
+    def __init__(self, lane):
+        self.ratio        = lane.ratio
+
+        self.rx_invert    = lane.rx_invert
+        self.rx_align     = lane.rx_align
+        self.rx_present   = lane.rx_present
+        self.rx_locked    = lane.rx_locked
+        self.rx_aligned   = lane.rx_aligned
+
+        self.rx_symbol    = Signal(lane.ratio * 9)
+        self.rx_valid     = Signal(lane.ratio)
+
+        self.tx_symbol    = lane.tx_symbol
+        self.tx_set_disp  = lane.tx_set_disp
+        self.tx_disp      = lane.tx_disp
+        self.tx_e_idle    = lane.tx_e_idle
+
+        ###
+
+        self.submodules.slip = SymbolSlip(symbol_size=10, word_size=lane.ratio,
+                                          comma=(1<<9)|K(28,5))
+        self.comb += [
+            self.slip.en.eq(self.rx_align),
+            self.slip.i.eq(Cat(
+                (lane.rx_symbol.part(9 * n, 9), lane.rx_valid[n])
+                for n in range(lane.ratio)
+            )),
+            self.rx_symbol.eq(Cat(
+                self.slip.o.part(10 * n, 9)
+                for n in range(lane.ratio)
+            )),
+            self.rx_valid.eq(Cat(
+                self.slip.o[10 * n + 9]
+                for n in range(lane.ratio)
+            )),
+        ]

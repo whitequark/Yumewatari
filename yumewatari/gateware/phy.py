@@ -1,14 +1,11 @@
 from migen import *
 from migen.genlib.fsm import *
 
+from .serdes import K, D
 from .parser import *
 
 
 __all__ = ["PCIeRXPHY", "PCIeTXPHY"]
-
-
-def K(x, y): return (1 << 8) | (y << 5) | x
-def D(x, y): return (0 << 8) | (y << 5) | x
 
 
 _ts_layout = [
