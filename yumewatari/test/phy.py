@@ -12,10 +12,10 @@ class PCIeRXPHYTestbench(Module):
         self.submodules.phy  = PCIeRXPHY(self.lane)
 
     def do_finalize(self):
-        self.states = {v: k for k, v in self.phy.fsm.encoding.items()}
+        self.states = {v: k for k, v in self.phy.parser.fsm.encoding.items()}
 
     def phy_state(self):
-        return self.states[(yield self.phy.fsm.state)]
+        return self.states[(yield self.phy.parser.fsm.state)]
 
     def transmit(self, symbols):
         for symbol in symbols:
@@ -73,11 +73,11 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield tb.lane.rx_symbol.eq(D(5,2))
         yield
         yield from self.assertSignal(tb.phy._tsZ.ts_id, 1)
-        yield from self.assertState(tb, "TSn-IDn")
-        for _ in range(8):
+        yield from self.assertState(tb, "TSn-ID1")
+        for n in range(2, 10):
             yield tb.lane.rx_symbol.eq(D(5,2))
             yield
-            yield from self.assertState(tb, "TSn-IDn")
+            yield from self.assertState(tb, "TSn-ID%d" % n)
         yield tb.lane.rx_symbol.eq(K(28,5))
         yield
         yield from self.assertSignal(tb.phy._tsZ.valid, 1)
@@ -127,7 +127,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
             K(28,5),
         ])
         yield from self.assertSignal(tb.lane.rx_invert, 1)
-        yield from self.assertTSnState(tb.phy._tsZ, valid=0)
+        yield from self.assertTSnState(tb.phy._tsZ)
 
     @simulation_test
     def test_rx_ts2_inverted_valid(self, tb):
@@ -136,7 +136,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
             K(28,5),
         ])
         yield from self.assertSignal(tb.lane.rx_invert, 1)
-        yield from self.assertTSnState(tb.phy._tsZ, valid=0)
+        yield from self.assertTSnState(tb.phy._tsZ)
 
     @simulation_test
     def test_rx_ts1_link_valid(self, tb):
@@ -218,7 +218,6 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         ):
             yield from self.tb.transmit([
                 K(28,5), 0xaa, 0x1a, 0xff, 0b0010, bit, *[D(10,2) for _ in range(10)],
-                K(28,0),
             ])
             yield from self.assertTSnState(tb.phy._tsZ,
                 link_valid=1, link_number=0xaa,
@@ -237,6 +236,8 @@ class PCIeRXPHYTestCase(unittest.TestCase):
     @simulation_test
     def test_rx_ts1_idN_invalid(self, tb):
         for n in range(10):
+            yield self.tb.lane.rx_symbol.eq(0)
+            yield
             yield from self.tb.transmit([
                 K(28,5), 0xaa, 0x1a, 0xff, 0b0010, 0b0001, *[D(10,2) for _ in range(n)], 0x1ee
             ])

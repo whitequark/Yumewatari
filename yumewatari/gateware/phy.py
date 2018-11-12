@@ -1,6 +1,8 @@
 from migen import *
 from migen.genlib.fsm import *
 
+from .parser import *
+
 
 __all__ = ["PCIeRXPHY", "PCIeTXPHY"]
 
@@ -47,109 +49,139 @@ class PCIeRXPHY(Module):
         self._tsZ  = Record(_ts_layout) # TS being received
         self.sync += If(self.error, self._tsZ.valid.eq(0))
 
-        id_ctr = Signal(max=10)
-        ts_idx = Signal(2) # bit 0: TS1/TS2, bit 1: noninverted/inverted
         ts_id  = Signal(9)
+        ts_inv = Signal()
 
-        self.submodules.fsm = ResetInserter()(FSM())
-        self.comb += self.fsm.reset.eq(~lane.rx_valid | self.error)
-        self.fsm.act("COMMA",
-            If(lane.rx_symbol == K(28,5),
+        self.submodules.parser = Parser(symbol_width=9, reset_rule="COMMA")
+        self.comb += [
+            self.parser.reset.eq(~lane.rx_valid),
+            self.parser.i.eq(lane.rx_symbol),
+            self.error.eq(self.parser.error)
+        ]
+        self.parser.rule(
+            name="COMMA",
+            cond=lambda symbol: symbol == D(0,0),
+            succ="COMMA"
+        )
+        self.parser.rule(
+            name="COMMA",
+            cond=lambda symbol: symbol == K(28,5),
+            succ="TSn-LINK/SKP-0",
+            action=lambda symbol: [
                 NextValue(self._tsZ.valid, 1),
                 NextValue(self._tsY.raw_bits(), self._tsZ.raw_bits()),
-                NextState("TSn-LINK/SKP-0")
-            )
+            ]
         )
-        self.fsm.act("TSn-LINK/SKP-0",
-            If(lane.rx_symbol == K(28,0),
-                NextState("SKP-1")
-            ).Else(
-                If(lane.rx_symbol == K(23,7),
-                    NextValue(self._tsZ.link.valid,  0),
-                ).Elif(~lane.rx_symbol[8],
-                    NextValue(self._tsZ.link.valid,  1),
-                ).Else(
-                    self.error.eq(1)
-                ),
-                NextValue(self._tsZ.link.number, lane.rx_symbol),
-                NextState("TSn-LANE")
-            )
+        self.parser.rule(
+            name="TSn-LINK/SKP-0",
+            cond=lambda symbol: symbol == K(28,0),
+            succ="SKP-1"
+        )
+        self.parser.rule(
+            name="TSn-LINK/SKP-0",
+            cond=lambda symbol: symbol == K(23,7),
+            succ="TSn-LANE",
+            action=lambda symbol: [
+                NextValue(self._tsZ.link.valid,  0)
+            ]
+        )
+        self.parser.rule(
+            name="TSn-LINK/SKP-0",
+            cond=lambda symbol: ~symbol[8],
+            succ="TSn-LANE",
+            action=lambda symbol: [
+                NextValue(self._tsZ.link.number, symbol),
+                NextValue(self._tsZ.link.valid,  1)
+            ]
         )
         for n in range(1, 3):
-            self.fsm.act("SKP-%d" % n,
-                If(lane.rx_symbol != K(28,0),
-                    self.error.eq(1)
-                ),
-                NextState("SKP-%d" % (n + 1) if n < 2 else "COMMA")
+            self.parser.rule(
+                name="SKP-%d" % n,
+                cond=lambda symbol: symbol == K(28,0),
+                succ="COMMA" if n == 2 else "SKP-%d" % (n + 1),
             )
-        self.fsm.act("TSn-LANE",
-            If(lane.rx_symbol == K(23,7),
-                NextValue(self._tsZ.lane.valid,  0),
-            ).Elif(~lane.rx_symbol[8],
-                NextValue(self._tsZ.lane.valid,  1),
-            ).Else(
-                self.error.eq(1)
-            ),
-            NextValue(self._tsZ.lane.number, lane.rx_symbol),
-            NextState("TSn-FTS")
+        self.parser.rule(
+            name="TSn-LANE",
+            cond=lambda symbol: symbol == K(23,7),
+            succ="TSn-FTS",
+            action=lambda symbol: [
+                NextValue(self._tsZ.lane.valid,  0)
+            ]
         )
-        self.fsm.act("TSn-FTS",
-            If(lane.rx_symbol[8],
-                self.error.eq(1)
-            ),
-            NextValue(self._tsZ.n_fts, lane.rx_symbol),
-            NextState("TSn-RATE")
+        self.parser.rule(
+            name="TSn-LANE",
+            cond=lambda symbol: ~symbol[8],
+            succ="TSn-FTS",
+            action=lambda symbol: [
+                NextValue(self._tsZ.lane.number, symbol),
+                NextValue(self._tsZ.lane.valid,  1)
+            ]
         )
-        self.fsm.act("TSn-RATE",
-            If(lane.rx_symbol[8],
-                self.error.eq(1)
-            ),
-            NextValue(self._tsZ.rate.raw_bits(), lane.rx_symbol),
-            NextState("TSn-CTRL")
+        self.parser.rule(
+            name="TSn-FTS",
+            cond=lambda symbol: ~symbol[8],
+            succ="TSn-RATE",
+            action=lambda symbol: [
+                NextValue(self._tsZ.n_fts, symbol)
+            ]
         )
-        self.fsm.act("TSn-CTRL",
-            If(lane.rx_symbol[8],
-                self.error.eq(1)
-            ),
-            NextValue(self._tsZ.ctrl.raw_bits(), lane.rx_symbol),
-            NextState("TSn-ID0")
+        self.parser.rule(
+            name="TSn-RATE",
+            cond=lambda symbol: ~symbol[8],
+            succ="TSn-CTRL",
+            action=lambda symbol: [
+                NextValue(self._tsZ.rate.raw_bits(), symbol)
+            ]
         )
-        self.fsm.act("TSn-ID0",
-            If(lane.rx_symbol == D(10,2),
-                NextValue(ts_idx, 0),
-                NextValue(self._tsZ.ts_id, 0),
-            ).Elif(lane.rx_symbol == D(5,2),
-                NextValue(ts_idx, 1),
-                NextValue(self._tsZ.ts_id, 1),
-            ).Elif(lane.rx_symbol == D(21,5),
-                NextValue(ts_idx, 2),
-                NextValue(self._tsZ.valid, 0),
-            ).Elif(lane.rx_symbol == D(26,5),
-                NextValue(ts_idx, 3),
-                NextValue(self._tsZ.valid, 0),
-            ).Else(
-                self.error.eq(1)
-            ),
-            NextValue(id_ctr, 1),
-            NextValue(ts_id, lane.rx_symbol),
-            NextState("TSn-IDn")
+        self.parser.rule(
+            name="TSn-CTRL",
+            cond=lambda symbol: ~symbol[8],
+            succ="TSn-ID0",
+            action=lambda symbol: [
+                NextValue(self._tsZ.ctrl.raw_bits(), symbol)
+            ]
         )
-        self.fsm.act("TSn-IDn",
-            If(lane.rx_symbol != ts_id,
-                self.error.eq(1)
-            ),
-            NextValue(id_ctr, id_ctr + 1),
-            If(id_ctr == 9,
-                If(self._tsZ.raw_bits() == self._tsY.raw_bits(),
-                    NextValue(self.ts.raw_bits(), self._tsY.raw_bits())
-                ).Else(
-                    NextValue(self.ts.valid, 0)
-                ),
-                If(ts_idx[1],
+        self.parser.rule(
+            name="TSn-ID0",
+            cond=lambda symbol: (symbol == D(10,2)) |
+                                (symbol == D( 5,2)) |
+                                (symbol == D(21,5)) |
+                                (symbol == D(26,5)),
+            succ="TSn-ID1",
+            action=lambda symbol: [
+                NextMemory(ts_id, symbol),
+                If(symbol == D(10,2),
+                    NextValue(ts_inv, 0),
+                    NextValue(self._tsZ.ts_id, 0),
+                ).Elif(symbol == D(5,2),
+                    NextValue(ts_inv, 0),
+                    NextValue(self._tsZ.ts_id, 1),
+                ).Elif(symbol == D(21,5),
+                    NextValue(ts_inv, 1),
+                ).Elif(symbol == D(26,5),
+                    NextValue(ts_inv, 1),
+                )
+            ]
+        )
+        for n in range(1, 9):
+            self.parser.rule(
+                name="TSn-ID%d" % n,
+                cond=lambda symbol: symbol == Memory(ts_id),
+                succ="TSn-ID%d" % (n + 1)
+            )
+        self.parser.rule(
+            name="TSn-ID9",
+            cond=lambda symbol: symbol == Memory(ts_id),
+            succ="COMMA",
+            action=lambda symbol: [
+                NextValue(self.ts.valid, 0),
+                If(ts_inv,
                     NextValue(lane.rx_invert, ~lane.rx_invert)
+                ).Elif(self._tsZ.raw_bits() == self._tsY.raw_bits(),
+                    NextValue(self.ts.raw_bits(), self._tsY.raw_bits())
                 ),
                 NextState("COMMA")
-            )
+            ]
         )
 
 
@@ -158,8 +190,6 @@ class PCIeTXPHY(Module):
         self.ts = Record(_ts_layout)
 
         ###
-
-        id_ctr = Signal(max=10)
 
         self.submodules.fsm = ResetInserter()(FSM(reset_state="IDLE"))
         self.fsm.act("IDLE",
@@ -193,17 +223,14 @@ class PCIeTXPHY(Module):
         )
         self.fsm.act("TSn-CTRL",
             lane.tx_symbol.eq(self.ts.ctrl.raw_bits()),
-            NextValue(id_ctr, 0),
-            NextState("TSn-IDn")
+            NextState("TSn-ID0")
         )
-        self.fsm.act("TSn-IDn",
-            NextValue(id_ctr, id_ctr + 1),
-            If(self.ts.ts_id == 0,
-                lane.tx_symbol.eq(D(10,2))
-            ).Else(
-                lane.tx_symbol.eq(D(5,2))
-            ),
-            If(id_ctr == 9,
-                NextState("IDLE")
+        for n in range(0, 10):
+            self.fsm.act("TSn-ID%d" % n,
+                If(self.ts.ts_id == 0,
+                    lane.tx_symbol.eq(D(10,2))
+                ).Else(
+                    lane.tx_symbol.eq(D(5,2))
+                ),
+                NextState("IDLE" if n == 9 else "TSn-ID%d" % (n + 1))
             )
-        )
