@@ -6,9 +6,17 @@ from ..gateware.phy import K, D, PCIeRXPHY, PCIeTXPHY
 from . import simulation_test
 
 
+class _PHYTestCase(unittest.TestCase):
+    def assertState(self, tb, state):
+        self.assertEqual((yield from tb.phy_state()), state)
+
+    def assertSignal(self, signal, value):
+        self.assertEqual((yield signal), value)
+
+
 class PCIeRXPHYTestbench(Module):
-    def __init__(self):
-        self.submodules.lane = PCIeSERDESInterface()
+    def __init__(self, ratio=1):
+        self.submodules.lane = PCIeSERDESInterface(ratio)
         self.submodules.phy  = PCIeRXPHY(self.lane)
 
     def do_finalize(self):
@@ -18,24 +26,23 @@ class PCIeRXPHYTestbench(Module):
         return self.states[(yield self.phy.parser.fsm.state)]
 
     def transmit(self, symbols):
-        for symbol in symbols:
-            assert (yield self.phy.error) == 0
-            yield self.lane.rx_symbol.eq(symbol)
+        for i, word in enumerate(symbols):
+            if i > 0:
+                assert (yield self.phy.error) == 0
+            if isinstance(word, tuple):
+                for j, symbol in enumerate(word):
+                    yield self.lane.rx_symbol.part(j * 9, 9).eq(symbol)
+            else:
+                yield self.lane.rx_symbol.eq(word)
             yield
 
 
-class PCIeRXPHYTestCase(unittest.TestCase):
+class PCIeRXPHYTestCase(_PHYTestCase):
     def setUp(self):
         self.tb = PCIeRXPHYTestbench()
 
     def simulationSetUp(self, tb):
         yield tb.lane.rx_valid.eq(1)
-
-    def assertState(self, tb, state):
-        self.assertEqual((yield from tb.phy_state()), state)
-
-    def assertSignal(self, signal, value):
-        self.assertEqual((yield signal), value)
 
     @simulation_test
     def test_rx_tsn_cycle_by_cycle(self, tb):
@@ -292,6 +299,25 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.assertSignal(tb.phy.ts.valid, 1)
 
 
+class PCIeRXPHYGear2xTestCase(_PHYTestCase):
+    def setUp(self):
+        self.tb = PCIeRXPHYTestbench(ratio=2)
+
+    def simulationSetUp(self, tb):
+        yield tb.lane.rx_valid.eq(1)
+
+    @simulation_test
+    def test_rx_ts1_2x_same_valid(self, tb):
+        yield from self.tb.transmit([
+            (K(28,5), 0xaa), (0x1a, 0xff), (0b0010, 0b0000),
+                *[(D(10,2), D(10,2)) for _ in range(5)],
+            (K(28,5), 0xaa), (0x1a, 0xff), (0b0010, 0b0000),
+                *[(D(10,2), D(10,2)) for _ in range(5)],
+            (K(28,5), K(28,0)),
+        ])
+        yield from self.assertSignal(tb.phy.ts.valid, 1)
+
+
 class PCIeTXPHYTestbench(Module):
     def __init__(self):
         self.submodules.lane = PCIeSERDESInterface()
@@ -311,7 +337,7 @@ class PCIeTXPHYTestbench(Module):
         return symbols
 
 
-class PCIeTXPHYTestCase(unittest.TestCase):
+class PCIeTXPHYTestCase(_PHYTestCase):
     def setUp(self):
         self.tb = PCIeTXPHYTestbench()
 

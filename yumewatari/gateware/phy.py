@@ -52,17 +52,12 @@ class PCIeRXPHY(Module):
         ts_id  = Signal(9)
         ts_inv = Signal()
 
-        self.submodules.parser = Parser(symbol_width=9, reset_rule="COMMA")
+        self.submodules.parser = Parser(symbol_size=9, word_size=lane.ratio, reset_rule="COMMA")
         self.comb += [
             self.parser.reset.eq(~lane.rx_valid),
             self.parser.i.eq(lane.rx_symbol),
             self.error.eq(self.parser.error)
         ]
-        self.parser.rule(
-            name="COMMA",
-            cond=lambda symbol: symbol == D(0,0),
-            succ="COMMA"
-        )
         self.parser.rule(
             name="COMMA",
             cond=lambda symbol: symbol == K(28,5),
@@ -143,24 +138,40 @@ class PCIeRXPHY(Module):
         )
         self.parser.rule(
             name="TSn-ID0",
-            cond=lambda symbol: (symbol == D(10,2)) |
-                                (symbol == D( 5,2)) |
-                                (symbol == D(21,5)) |
-                                (symbol == D(26,5)),
+            cond=lambda symbol: symbol == D(10,2),
             succ="TSn-ID1",
             action=lambda symbol: [
                 NextMemory(ts_id, symbol),
-                If(symbol == D(10,2),
-                    NextValue(ts_inv, 0),
-                    NextValue(self._tsZ.ts_id, 0),
-                ).Elif(symbol == D(5,2),
-                    NextValue(ts_inv, 0),
-                    NextValue(self._tsZ.ts_id, 1),
-                ).Elif(symbol == D(21,5),
-                    NextValue(ts_inv, 1),
-                ).Elif(symbol == D(26,5),
-                    NextValue(ts_inv, 1),
-                )
+                NextValue(ts_inv, 0),
+                NextValue(self._tsZ.ts_id, 0),
+            ]
+        )
+        self.parser.rule(
+            name="TSn-ID0",
+            cond=lambda symbol: symbol == D(5,2),
+            succ="TSn-ID1",
+            action=lambda symbol: [
+                NextMemory(ts_id, symbol),
+                NextValue(ts_inv, 0),
+                NextValue(self._tsZ.ts_id, 1),
+            ]
+        )
+        self.parser.rule(
+            name="TSn-ID0",
+            cond=lambda symbol: symbol == D(21,5),
+            succ="TSn-ID1",
+            action=lambda symbol: [
+                NextMemory(ts_id, symbol),
+                NextValue(ts_inv, 1),
+            ]
+        )
+        self.parser.rule(
+            name="TSn-ID0",
+            cond=lambda symbol: symbol == D(26,5),
+            succ="TSn-ID1",
+            action=lambda symbol: [
+                NextMemory(ts_id, symbol),
+                NextValue(ts_inv, 1),
             ]
         )
         for n in range(1, 9):
