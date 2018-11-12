@@ -41,7 +41,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
     def test_rx_tsn_cycle_by_cycle(self, tb):
         yield tb.lane.rx_symbol.eq(K(28,5))
         yield
-        yield from self.assertState(tb, "IDLE")
+        yield from self.assertState(tb, "COMMA")
         yield tb.lane.rx_symbol.eq(D(1,0))
         yield
         yield from self.assertState(tb, "TSn-LINK")
@@ -81,7 +81,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield tb.lane.rx_symbol.eq(K(28,5))
         yield
         yield from self.assertSignal(tb.phy._tsZ.valid, 1)
-        yield from self.assertState(tb, "IDLE")
+        yield from self.assertState(tb, "COMMA")
 
     def assertTSnState(self, tsN, valid=1, link_valid=0, link_number=0,
                        lane_valid=0, lane_number=0, n_fts=0, rate_gen1=0,
@@ -102,7 +102,7 @@ class PCIeRXPHYTestCase(unittest.TestCase):
         yield from self.assertSignal(tb.phy.ts_error, 1)
         yield
         yield from self.assertSignal(tb.phy._tsZ.valid, 0)
-        yield from self.assertState(tb, "IDLE")
+        yield from self.assertState(tb, "COMMA")
 
     @simulation_test
     def test_rx_ts1_empty_valid(self, tb):

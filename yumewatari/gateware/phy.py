@@ -43,16 +43,17 @@ class PCIeRXPHY(Module):
 
         self.comb += lane.rx_align.eq(1)
 
-        self._tsZ = Record(_ts_layout) # TS being received
-        self._tsY = Record(_ts_layout) # previous TS received
+        self._tsY  = Record(_ts_layout) # previous TS received
+        self._tsZ  = Record(_ts_layout) # TS being received
+        self.sync += If(self.ts_error, self._tsZ.valid.eq(0))
 
         id_ctr = Signal(max=10)
         ts_idx = Signal(2) # bit 0: TS1/TS2, bit 1: noninverted/inverted
         ts_id  = Signal(9)
 
-        self.submodules.fsm = ResetInserter()(FSM(reset_state="IDLE"))
-        self.comb += self.fsm.reset.eq(~lane.rx_valid)
-        self.fsm.act("IDLE",
+        self.submodules.fsm = ResetInserter()(FSM())
+        self.comb += self.fsm.reset.eq(~lane.rx_valid | self.ts_error)
+        self.fsm.act("COMMA",
             If(lane.rx_symbol == K(28,5),
                 NextValue(self._tsZ.valid, 1),
                 NextValue(self._tsY.raw_bits(), self._tsZ.raw_bits()),
@@ -60,106 +61,83 @@ class PCIeRXPHY(Module):
             )
         )
         self.fsm.act("TSn-LINK",
-            NextValue(self._tsZ.link.number, lane.rx_symbol),
             If(lane.rx_symbol == K(23,7),
                 NextValue(self._tsZ.link.valid,  0),
-                NextState("TSn-LANE")
             ).Elif(~lane.rx_symbol[8],
                 NextValue(self._tsZ.link.valid,  1),
-                NextState("TSn-LANE")
             ).Else(
-                self.ts_error.eq(1),
-                NextValue(self._tsZ.valid, 0),
-                NextState("IDLE")
-            )
+                self.ts_error.eq(1)
+            ),
+            NextValue(self._tsZ.link.number, lane.rx_symbol),
+            NextState("TSn-LANE")
         )
         self.fsm.act("TSn-LANE",
-            NextValue(self._tsZ.lane.number, lane.rx_symbol),
             If(lane.rx_symbol == K(23,7),
                 NextValue(self._tsZ.lane.valid,  0),
-                NextState("TSn-FTS")
             ).Elif(~lane.rx_symbol[8],
                 NextValue(self._tsZ.lane.valid,  1),
-                NextState("TSn-FTS")
             ).Else(
-                self.ts_error.eq(1),
-                NextValue(self._tsZ.valid, 0),
-                NextState("IDLE")
-            )
+                self.ts_error.eq(1)
+            ),
+            NextValue(self._tsZ.lane.number, lane.rx_symbol),
+            NextState("TSn-FTS")
         )
         self.fsm.act("TSn-FTS",
+            If(lane.rx_symbol[8],
+                self.ts_error.eq(1)
+            ),
             NextValue(self._tsZ.n_fts, lane.rx_symbol),
-            If(~lane.rx_symbol[8],
-                NextState("TSn-RATE")
-            ).Else(
-                self.ts_error.eq(1),
-                NextValue(self._tsZ.valid, 0),
-                NextState("IDLE")
-            )
+            NextState("TSn-RATE")
         )
         self.fsm.act("TSn-RATE",
+            If(lane.rx_symbol[8],
+                self.ts_error.eq(1)
+            ),
             NextValue(self._tsZ.rate.raw_bits(), lane.rx_symbol),
-            If(~lane.rx_symbol[8],
-                NextState("TSn-CTRL")
-            ).Else(
-                self.ts_error.eq(1),
-                NextValue(self._tsZ.valid, 0),
-                NextState("IDLE")
-            )
+            NextState("TSn-CTRL")
         )
         self.fsm.act("TSn-CTRL",
+            If(lane.rx_symbol[8],
+                self.ts_error.eq(1)
+            ),
             NextValue(self._tsZ.ctrl.raw_bits(), lane.rx_symbol),
-            If(~lane.rx_symbol[8],
-                NextState("TSn-ID0")
-            ).Else(
-                self.ts_error.eq(1),
-                NextValue(self._tsZ.valid, 0),
-                NextState("IDLE")
-            )
+            NextState("TSn-ID0")
         )
         self.fsm.act("TSn-ID0",
-            NextValue(id_ctr, 1),
-            NextValue(ts_id, lane.rx_symbol),
             If(lane.rx_symbol == D(10,2),
                 NextValue(ts_idx, 0),
                 NextValue(self._tsZ.ts_id, 0),
-                NextState("TSn-IDn")
             ).Elif(lane.rx_symbol == D(5,2),
                 NextValue(ts_idx, 1),
                 NextValue(self._tsZ.ts_id, 1),
-                NextState("TSn-IDn")
             ).Elif(lane.rx_symbol == D(21,5),
                 NextValue(ts_idx, 2),
                 NextValue(self._tsZ.valid, 0),
-                NextState("TSn-IDn")
             ).Elif(lane.rx_symbol == D(26,5),
                 NextValue(ts_idx, 3),
                 NextValue(self._tsZ.valid, 0),
-                NextState("TSn-IDn")
             ).Else(
-                self.ts_error.eq(1),
-                NextValue(self._tsZ.valid, 0),
-                NextState("IDLE")
-            )
+                self.ts_error.eq(1)
+            ),
+            NextValue(id_ctr, 1),
+            NextValue(ts_id, lane.rx_symbol),
+            NextState("TSn-IDn")
         )
         self.fsm.act("TSn-IDn",
+            If(lane.rx_symbol != ts_id,
+                self.ts_error.eq(1)
+            ),
             NextValue(id_ctr, id_ctr + 1),
-            If(lane.rx_symbol == ts_id,
-                If(id_ctr == 9,
-                    If(self._tsZ.raw_bits() == self._tsY.raw_bits(),
-                        NextValue(self.ts.raw_bits(), self._tsY.raw_bits())
-                    ).Else(
-                        NextValue(self.ts.valid, 0)
-                    ),
-                    If(ts_idx[1],
-                        NextValue(lane.rx_invert, ~lane.rx_invert)
-                    ),
-                    NextState("IDLE")
-                )
-            ).Else(
-                self.ts_error.eq(1),
-                NextValue(self._tsZ.valid, 0),
-                NextState("IDLE")
+            If(id_ctr == 9,
+                If(self._tsZ.raw_bits() == self._tsY.raw_bits(),
+                    NextValue(self.ts.raw_bits(), self._tsY.raw_bits())
+                ).Else(
+                    NextValue(self.ts.valid, 0)
+                ),
+                If(ts_idx[1],
+                    NextValue(lane.rx_invert, ~lane.rx_invert)
+                ),
+                NextState("COMMA")
             )
         )
 
