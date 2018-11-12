@@ -6,6 +6,8 @@ from migen.genlib.fifo import AsyncFIFO
 from migen.genlib.fsm import FSM
 
 from ..gateware.serdes import *
+from ..gateware.phy import K
+from ..gateware.align import *
 from ..gateware.platform.lattice_ecp5 import *
 from ..vendor.pads import *
 from ..vendor.uart import *
@@ -18,21 +20,27 @@ class SERDESTestbench(Module):
              ("tp0", 0, Pins("X3:5"), IOStandard("LVCMOS33")),
         ])
 
-        self.submodules.serdes = serdes = LatticeECP5PCIeSERDES(self.platform.request("pcie_x1"))
-        self.comb += [
-            serdes.lane.tx_symbol.eq(0x17C),
-            serdes.lane.rx_align.eq(1),
-        ]
-
         self.clock_domains.cd_ref = ClockDomain()
         self.clock_domains.cd_rx = ClockDomain()
         self.clock_domains.cd_tx = ClockDomain()
+
+        self.submodules.serdes = serdes = \
+            LatticeECP5PCIeSERDES(self.platform.request("pcie_x1"))
         self.comb += [
             self.cd_ref.clk.eq(serdes.ref_clk),
             serdes.rx_clk_i.eq(serdes.rx_clk_o),
             self.cd_rx.clk.eq(serdes.rx_clk_i),
             serdes.tx_clk_i.eq(serdes.tx_clk_o),
             self.cd_tx.clk.eq(serdes.tx_clk_i),
+
+            serdes.lane.tx_symbol.eq(0x17C),
+            serdes.lane.rx_align.eq(1),
+        ]
+
+        self.submodules.aligner = aligner = \
+            ClockDomainsRenamer("rx")(SymbolSlip(symbol_size=9, word_size=2, comma=K(28,5)))
+        self.comb += [
+            aligner.i.eq(serdes.lane.rx_symbol),
         ]
 
         self.platform.add_platform_command("""FREQUENCY NET "ref_clk" 100 MHz;""")
@@ -65,18 +73,6 @@ class SERDESTestbench(Module):
             led_err4.eq(~(0)),
         ]
 
-        self.clock_domains.cd_por = ClockDomain(reset_less=True)
-        reset_delay = Signal(max=2047, reset=2047)
-        self.comb += [
-            self.cd_por.clk.eq(self.cd_ref.clk),
-            self.cd_ref.rst.eq(reset_delay != 0)
-        ]
-        self.sync.por += [
-            If(reset_delay != 0,
-                reset_delay.eq(reset_delay - 1)
-            )
-        ]
-
         trigger_rx  = Signal()
         trigger_ref = Signal()
         self.specials += MultiReg(trigger_ref, trigger_rx, odomain="rx")
@@ -88,7 +84,7 @@ class SERDESTestbench(Module):
             AsyncFIFO(width=18, depth=capture_depth)
         )
         self.comb += [
-            symbols.din.eq(Cat(serdes.lane.rx_symbol)),
+            symbols.din.eq(Cat(aligner.o)),
             symbols.we.eq(capture)
         ]
         self.sync.rx += [
