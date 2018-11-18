@@ -1,5 +1,4 @@
 from migen import *
-from migen.genlib.fsm import *
 
 from .serdes import K, D
 from .protocol import *

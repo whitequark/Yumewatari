@@ -60,9 +60,19 @@ class PHYTestbench(Module):
         tp0 = self.platform.request("tp0")
         self.comb += tp0.eq(self.phy.rx.ts.link.valid)
 
+        self.phy.finalize()
+
         self.submodules += CRG(serdes.ref_clk)
         self.submodules += add_probe_single("lane0.rx", "ts",
                                             self.phy.rx.ts.raw_bits(), clock_domain="rx")
+        self.submodules += add_probe_single("lane0.rx", "ts.link",
+                                            self.phy.rx.ts.link.raw_bits(), clock_domain="rx")
+        self.submodules += add_probe_single("lane0.rx", "ts.lane",
+                                            self.phy.rx.ts.lane.raw_bits(), clock_domain="rx")
+        self.submodules += add_probe_single("lane0.tx", "ts",
+                                            self.phy.tx.ts.raw_bits(), clock_domain="rx")
+        self.submodules += add_probe_single("lane0", "state",
+                                            self.phy.ltssm.state, clock_domain="rx")
         self.submodules += Microscope(self.platform.request("serial"), 99.8e6)
 
 # -------------------------------------------------------------------------------------------------
