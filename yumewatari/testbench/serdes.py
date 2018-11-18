@@ -6,7 +6,7 @@ from migen.genlib.fifo import AsyncFIFO
 from migen.genlib.fsm import FSM
 
 from ..gateware.serdes import *
-from ..gateware.phy import K, PCIeTXPHY
+from ..gateware.phy import K, PCIePHYTX
 from ..gateware.align import *
 from ..gateware.platform.lattice_ecp5 import *
 from ..vendor.pads import *
@@ -36,7 +36,7 @@ class SERDESTestbench(Module):
             self.cd_tx.clk.eq(serdes.tx_clk_i),
         ]
 
-        self.submodules.tx_phy = ClockDomainsRenamer("tx")(PCIeTXPHY(aligner))
+        self.submodules.tx_phy = ClockDomainsRenamer("tx")(PCIePHYTX(aligner))
         self.comb += [
             self.aligner.rx_align.eq(1),
             self.tx_phy.ts.n_fts.eq(0xff),
