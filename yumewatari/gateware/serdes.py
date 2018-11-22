@@ -51,6 +51,16 @@ class PCIeSERDESInterface(Module):
         running disparity.
     tx_e_idle : Signal(ratio)
         Assert to transmit Electrical Idle for that symbol.
+
+    det_enable : Signal
+        Rising edge starts the Receiver Detection test. Transmitter must be in Electrical Idle
+        when ``det_enable`` is asserted.
+    det_valid : Signal
+        Asserted to indicate that the Receiver Detection test has finished, deasserted together
+        with ``det_enable``.
+    det_status : Signal
+        Valid when ``det_valid`` is asserted. Indicates whether a receiver has been detected
+        on this lane.
     """
     def __init__(self, ratio=1):
         self.ratio        = ratio
@@ -68,6 +78,10 @@ class PCIeSERDESInterface(Module):
         self.tx_set_disp  = Signal(ratio)
         self.tx_disp      = Signal(ratio)
         self.tx_e_idle    = Signal(ratio)
+
+        self.det_enable   = Signal()
+        self.det_valid    = Signal()
+        self.det_status   = Signal()
 
 
 class PCIeSERDESAligner(PCIeSERDESInterface):
@@ -91,6 +105,10 @@ class PCIeSERDESAligner(PCIeSERDESInterface):
         self.tx_set_disp  = lane.tx_set_disp
         self.tx_disp      = lane.tx_disp
         self.tx_e_idle    = lane.tx_e_idle
+
+        self.det_enable   = lane.det_enable
+        self.det_valid    = lane.det_valid
+        self.det_status   = lane.det_status
 
         ###
 
