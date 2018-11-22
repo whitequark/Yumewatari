@@ -36,8 +36,8 @@ class PCIePHYRX(Module):
         self.comb += [
             self.parser.reset.eq(~lane.rx_valid),
             self.parser.i.eq(lane.rx_symbol),
-            self.error.eq(self.parser.error)
         ]
+        self.sync += self.error.eq(self.parser.error)
         self.parser.rule(
             name="COMMA",
             cond=lambda symbol: symbol.raw_bits() == K(28,5),
