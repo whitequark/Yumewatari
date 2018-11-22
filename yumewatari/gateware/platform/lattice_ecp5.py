@@ -10,7 +10,8 @@ __all__ = ["LatticeECP5PCIeSERDES"]
 class LatticeECP5PCIeSERDES(Module):
     """
     Lattice ECP5 DCU configured in PCIe mode. Assumes 100 MHz reference clock on SERDES clock
-    input pair. Uses 1:2 gearing. Only provides a single lane.
+    input pair. Uses 1:2 gearing. Receiver Detection runs in TX clock domain. Only provides
+    a single lane.
 
     Parameters
     ----------
@@ -96,6 +97,87 @@ class LatticeECP5PCIeSERDES(Module):
                                lane.tx_symbol[9:18],
                                lane.tx_set_disp[1], lane.tx_disp[1], lane.tx_e_idle[1])),
         ]
+
+        pcie_det_en = Signal()
+        pcie_ct     = Signal()
+        pcie_done   = Signal()
+        pcie_done_s = Signal()
+        pcie_con    = Signal()
+        pcie_con_s  = Signal()
+        self.specials += [
+            MultiReg(pcie_done, pcie_done_s, odomain="tx"),
+            MultiReg(pcie_con,  pcie_con_s,  odomain="tx"),
+        ]
+
+        det_timer   = Signal(max=16)
+
+        # All comments below from TN1261.
+        self.submodules.det_fsm = ResetInserter()(ClockDomainsRenamer("tx")(FSM()))
+        self.comb += self.det_fsm.reset.eq(~lane.det_enable)
+        # The PCIeSERDESInterface contract states that at det_enable rising edge the transmitter
+        # is already in Electrical Idle state, but not how long it is there.
+        self.det_fsm.act("START",
+            # Before starting a Receiver Detection test, the transmitter must be put into
+            # electrical idle by setting the tx_idle_ch#_c input high. The Receiver Detection
+            # test can begin 120 ns after tx_elec_idle is set high by driving the appropriate
+            # pci_det_en_ch#_c high.
+            NextValue(det_timer, 15),
+            NextState("SET-DETECT-H")
+        )
+        self.det_fsm.act("SET-DETECT-H",
+            # 1. The user drives pcie_det_en high, putting the corresponding TX driver into
+            #    receiver detect mode. [...] The TX driver takes some time to enter this state
+            #    so the pcie_det_en must be driven high for at least 120ns before pcie_ct
+            #    is asserted.
+            If(det_timer == 0,
+                NextValue(pcie_det_en, 1),
+                NextValue(det_timer, 15),
+                NextState("SET-STROBE-H")
+            ).Else(
+                NextValue(det_timer, det_timer - 1)
+            )
+        )
+        self.det_fsm.act("SET-STROBE-H",
+            # 2. The user drives pcie_ct high for four byte clocks.
+            If(det_timer == 0,
+                NextValue(pcie_ct, 1),
+                NextValue(det_timer, 3),
+                NextState("SET-STROBE-L")
+            ).Else(
+                NextValue(det_timer, det_timer - 1)
+            )
+        )
+        self.det_fsm.act("SET-STROBE-L",
+            # 3. SERDES drives the corresponding pcie_done low.
+            # (this happens asynchronously, so we're going to observe a few samples of pcie_done
+            # as high)
+            If(det_timer == 0,
+                NextValue(pcie_ct, 0),
+                NextState("WAIT-DONE-L")
+            ).Else(
+                NextValue(det_timer, det_timer - 1)
+            )
+        )
+        self.det_fsm.act("WAIT-DONE-L",
+            # 6. SERDES drives the corresponding pcie_done high
+            If(~pcie_done_s,
+                NextState("WAIT-DONE-H")
+            )
+        )
+        self.det_fsm.act("WAIT-DONE-H",
+            # 7. The user can use this asserted state of pcie_done to sample the pcie_con status
+            # to determine if the receiver detection was successful.
+            If(pcie_done_s,
+                NextValue(lane.det_status, pcie_con_s),
+                NextState("DONE")
+            )
+        )
+        self.det_fsm.act("DONE",
+            # TN1261 Figure 17 specifies "tdeth" (Transmitter Detect hold time?) but never
+            # elaborates on what value it should take. We currently assume tdeth=0.
+            NextValue(lane.det_valid, 1),
+            NextState("DONE")
+        )
 
         self.specials.dcu0 = Instance("DCUA",
             #============================ DCU
@@ -260,11 +342,17 @@ class LatticeECP5PCIeSERDES(Module):
             i_CH0_FF_TXI_CLK        = self.tx_clk_i,
 
             p_CH0_TX_GEAR_MODE      = "0b1",    # 1:2 gearbox
-            p_CH0_FF_TX_H_CLK_EN    = "0b1",    # disable DIV/1 output clock
-            p_CH0_FF_TX_F_CLK_DIS   = "0b1",    # enable  DIV/2 output clock
+            p_CH0_FF_TX_H_CLK_EN    = "0b1",    # enable  DIV/2 output clock
+            p_CH0_FF_TX_F_CLK_DIS   = "0b1",    # disable DIV/1 output clock
 
             # CH0 TX — data
             **{"o_CH0_FF_TX_D_%d" % n: self.tx_bus[n] for n in range(self.tx_bus.nbits)},
+
+            # CH0 DET
+            i_CH0_FFC_PCIE_DET_EN   = pcie_det_en,
+            i_CH0_FFC_PCIE_CT       = pcie_ct,
+            o_CH0_FFS_PCIE_DONE     = pcie_done,
+            o_CH0_FFS_PCIE_CON      = pcie_con,
         )
         self.dcu0.attr.add(("LOC", "DCU0"))
         self.dcu0.attr.add(("CHAN", "CH0"))
