@@ -171,7 +171,7 @@ if __name__ == "__main__":
                 if start is not None:
                     delta = time - start
                 else:
-                    delta = time
+                    delta = 0
 
                 print("%+10d cyc (%+10d us): %s" %
                       (delta, delta / 125, design.phy.ltssm.decoding[state]))
