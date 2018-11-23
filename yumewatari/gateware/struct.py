@@ -13,14 +13,19 @@ ts_layout = [
     ]),
     ("n_fts",       8),
     ("rate",  [
-        ("reserved",    1),
+        ("reserved0",   1),
         ("gen1",        1),
+        ("gen2",        1),
+        ("reserved1",   3),
+        ("autonomous_change",   1),
+        ("speed_change",        1),
     ]),
     ("ctrl",  [
-        ("reset",       1),
-        ("disable",     1),
-        ("loopback",    1),
-        ("unscramble",  1)
+        ("hot_reset",           1),
+        ("disable_link",        1),
+        ("loopback",            1),
+        ("disable_scrambling",  1),
+        ("compliance_receive",  1),
     ]),
     ("ts_id",       1), # 0: TS1, 1: TS2
 ]

@@ -45,8 +45,10 @@ class PCIePHYTXGear1xTestCase(_PCIePHYTXTestCase):
 
     @simulation_test
     def test_tx_ts1_pad(self, tb):
+        yield tb.phy.ts.valid.eq(1)
         yield tb.phy.ts.n_fts.eq(0xff)
         yield tb.phy.ts.rate.gen1.eq(1)
+        yield
         yield from self.assertReceive(tb, [
             K(28,5), K(23,7), K(23,7), 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
             K(28,5)
@@ -54,10 +56,12 @@ class PCIePHYTXGear1xTestCase(_PCIePHYTXTestCase):
 
     @simulation_test
     def test_tx_ts1_link(self, tb):
+        yield tb.phy.ts.valid.eq(1)
         yield tb.phy.ts.link.valid.eq(1)
         yield tb.phy.ts.link.number.eq(0xaa)
         yield tb.phy.ts.n_fts.eq(0xff)
         yield tb.phy.ts.rate.gen1.eq(1)
+        yield
         yield from self.assertReceive(tb, [
             K(28,5), 0xaa, K(23,7), 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
             K(28,5)
@@ -65,12 +69,14 @@ class PCIePHYTXGear1xTestCase(_PCIePHYTXTestCase):
 
     @simulation_test
     def test_tx_ts1_link_lane(self, tb):
+        yield tb.phy.ts.valid.eq(1)
         yield tb.phy.ts.link.valid.eq(1)
         yield tb.phy.ts.link.number.eq(0xaa)
         yield tb.phy.ts.lane.valid.eq(1)
         yield tb.phy.ts.lane.number.eq(0x01)
         yield tb.phy.ts.n_fts.eq(0xff)
         yield tb.phy.ts.rate.gen1.eq(1)
+        yield
         yield from self.assertReceive(tb, [
             K(28,5), 0xaa, 0x01, 0xff, 0b0010, 0b0000, *[D(10,2) for _ in range(10)],
             K(28,5)
@@ -78,9 +84,11 @@ class PCIePHYTXGear1xTestCase(_PCIePHYTXTestCase):
 
     @simulation_test
     def test_tx_ts1_reset(self, tb):
+        yield tb.phy.ts.valid.eq(1)
         yield tb.phy.ts.n_fts.eq(0xff)
         yield tb.phy.ts.rate.gen1.eq(1)
-        yield tb.phy.ts.ctrl.reset.eq(1)
+        yield tb.phy.ts.ctrl.hot_reset.eq(1)
+        yield
         yield from self.assertReceive(tb, [
             K(28,5), K(23,7), K(23,7), 0xff, 0b0010, 0b0001, *[D(10,2) for _ in range(10)],
             K(28,5)
@@ -88,9 +96,11 @@ class PCIePHYTXGear1xTestCase(_PCIePHYTXTestCase):
 
     @simulation_test
     def test_tx_ts2(self, tb):
+        yield tb.phy.ts.valid.eq(1)
         yield tb.phy.ts.n_fts.eq(0xff)
         yield tb.phy.ts.rate.gen1.eq(1)
         yield tb.phy.ts.ts_id.eq(1)
+        yield
         yield from self.assertReceive(tb, [
             K(28,5), K(23,7), K(23,7), 0xff, 0b0010, 0b0000, *[D(5,2) for _ in range(10)],
             K(28,5)
@@ -103,15 +113,15 @@ class PCIePHYTXGear2xTestCase(_PCIePHYTXTestCase):
 
     @simulation_test
     def test_tx_ts1_link_lane(self, tb):
+        yield tb.phy.ts.valid.eq(1)
         yield tb.phy.ts.link.valid.eq(1)
         yield tb.phy.ts.link.number.eq(0xaa)
         yield tb.phy.ts.lane.valid.eq(1)
         yield tb.phy.ts.lane.number.eq(0x01)
         yield tb.phy.ts.n_fts.eq(0xff)
         yield tb.phy.ts.rate.gen1.eq(1)
+        yield
         yield from self.assertReceive(tb, [
-            (K(28,5), K(23,7)), (0x01, 0xff), (0b0010, 0b0000),
-                *[(D(10,2), D(10,2)) for _ in range(5)],
             (K(28,5), 0xaa), (0x01, 0xff), (0b0010, 0b0000),
                 *[(D(10,2), D(10,2)) for _ in range(5)],
         ])

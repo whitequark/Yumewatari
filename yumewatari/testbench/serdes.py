@@ -171,7 +171,7 @@ CAPTURE_DEPTH = 1024
 
 if __name__ == "__main__":
     for arg in sys.argv[1:]:
-        if arg == "run":
+        if arg == "build":
             toolchain = "diamond"
             if toolchain == "trellis":
                 toolchain_path = "/usr/local/share/trellis"
@@ -180,6 +180,8 @@ if __name__ == "__main__":
 
             design = SERDESTestbench(CAPTURE_DEPTH, toolchain=toolchain)
             design.platform.build(design, toolchain_path=toolchain_path)
+
+        if arg == "load":
             subprocess.call(["/home/whitequark/Projects/prjtrellis/tools/bit_to_svf.py",
                              "build/top.bit",
                              "build/top.svf"])
@@ -188,7 +190,7 @@ if __name__ == "__main__":
                                    "prjtrellis/misc/openocd/ecp5-versa5g.cfg",
                              "-c", "init; svf -quiet build/top.svf; exit"])
 
-        if arg == "grab":
+        if arg == "sample":
             port = serial.Serial(port='/dev/ttyUSB1', baudrate=115200)
             port.write(b"\x00")
 

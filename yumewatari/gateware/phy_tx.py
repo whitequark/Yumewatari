@@ -10,8 +10,9 @@ __all__ = ["PCIePHYTX"]
 
 class PCIePHYTX(Module):
     def __init__(self, lane):
-        self.ts    = Record(ts_layout)
-        self.comma = Signal()
+        self.e_idle = Signal()
+        self.comma  = Signal()
+        self.ts     = Record(ts_layout)
 
         ###
 
@@ -37,6 +38,15 @@ class PCIePHYTX(Module):
         ]
         self.emitter.rule(
             name="IDLE",
+            cond=lambda: self.e_idle,
+            succ="IDLE",
+            action=lambda symbol: [
+                symbol.e_idle.eq(1)
+            ]
+        )
+        self.emitter.rule(
+            name="IDLE",
+            cond=lambda: self.ts.valid,
             succ="TSn-LINK",
             action=lambda symbol: [
                 self.comma.eq(1),

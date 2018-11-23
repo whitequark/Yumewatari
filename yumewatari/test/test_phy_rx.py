@@ -73,10 +73,10 @@ class PCIePHYRXGear1xTestCase(_PCIePHYRXTestCase):
         yield from self.assertState(tb, "TSn-CTRL")
         yield tb.lane.rx_symbol.eq(D(5,2))
         yield
-        yield from self.assertSignal(tb.phy._tsZ.ctrl.reset, 1)
-        yield from self.assertSignal(tb.phy._tsZ.ctrl.disable, 1)
+        yield from self.assertSignal(tb.phy._tsZ.ctrl.hot_reset, 1)
+        yield from self.assertSignal(tb.phy._tsZ.ctrl.disable_link, 1)
         yield from self.assertSignal(tb.phy._tsZ.ctrl.loopback, 1)
-        yield from self.assertSignal(tb.phy._tsZ.ctrl.unscramble, 1)
+        yield from self.assertSignal(tb.phy._tsZ.ctrl.disable_scrambling, 1)
         yield from self.assertState(tb, "TSn-ID0")
         yield tb.lane.rx_symbol.eq(D(5,2))
         yield
@@ -92,18 +92,20 @@ class PCIePHYRXGear1xTestCase(_PCIePHYRXTestCase):
         yield from self.assertState(tb, "COMMA")
 
     def assertTSnState(self, tsN, valid=1, link_valid=0, link_number=0,
-                       lane_valid=0, lane_number=0, n_fts=0, rate_gen1=0,
-                       ctrl_reset=0, ctrl_disable=0, ctrl_loopback=0, ctrl_unscramble=0,
+                       lane_valid=0, lane_number=0, n_fts=0, rate_gen1=0, rate_gen2=0,
+                       ctrl_hot_reset=0, ctrl_disable_link=0, ctrl_loopback=0,
+                       ctrl_disable_scrambling=0,
                        ts_id=0):
         yield from self.assertSignal(tsN.valid,           valid)
         yield from self.assertSignal(tsN.link.valid,      link_valid)
         yield from self.assertSignal(tsN.lane.valid,      lane_valid)
         yield from self.assertSignal(tsN.n_fts,           n_fts)
         yield from self.assertSignal(tsN.rate.gen1,       rate_gen1)
-        yield from self.assertSignal(tsN.ctrl.reset,      ctrl_reset)
-        yield from self.assertSignal(tsN.ctrl.disable,    ctrl_disable)
-        yield from self.assertSignal(tsN.ctrl.loopback,   ctrl_loopback)
-        yield from self.assertSignal(tsN.ctrl.unscramble, ctrl_unscramble)
+        yield from self.assertSignal(tsN.rate.gen2,       rate_gen2)
+        yield from self.assertSignal(tsN.ctrl.hot_reset,            ctrl_hot_reset)
+        yield from self.assertSignal(tsN.ctrl.disable_link,         ctrl_disable_link)
+        yield from self.assertSignal(tsN.ctrl.loopback,             ctrl_loopback)
+        yield from self.assertSignal(tsN.ctrl.disable_scrambling,   ctrl_disable_scrambling)
         yield from self.assertSignal(tsN.ts_id,           ts_id)
 
     def assertError(self, tb):
@@ -219,10 +221,10 @@ class PCIePHYRXGear1xTestCase(_PCIePHYRXTestCase):
     @simulation_test
     def test_rx_ts1_ctrl_valid(self, tb):
         for (ctrl, bit) in (
-            ("ctrl_reset",      0b0001),
-            ("ctrl_disable",    0b0010),
-            ("ctrl_loopback",   0b0100),
-            ("ctrl_unscramble", 0b1000),
+            ("ctrl_hot_reset",          0b0001),
+            ("ctrl_disable_link",       0b0010),
+            ("ctrl_loopback",           0b0100),
+            ("ctrl_disable_scrambling", 0b1000),
         ):
             yield from self.tb.transmit([
                 K(28,5), 0xaa, 0x1a, 0xff, 0b0010, bit, *[D(10,2) for _ in range(10)],

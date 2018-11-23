@@ -10,9 +10,9 @@ __all__ = ["PCIePHYRX"]
 
 class PCIePHYRX(Module):
     def __init__(self, lane):
-        self.ts    = Record(ts_layout)
-        self.comma = Signal()
-        self.error = Signal()
+        self.error  = Signal()
+        self.comma  = Signal()
+        self.ts     = Record(ts_layout)
 
         ###
 
@@ -36,8 +36,8 @@ class PCIePHYRX(Module):
         self.comb += [
             self.parser.reset.eq(~lane.rx_valid),
             self.parser.i.eq(lane.rx_symbol),
+            self.error.eq(self.parser.error)
         ]
-        self.sync += self.error.eq(self.parser.error)
         self.parser.rule(
             name="COMMA",
             cond=lambda symbol: symbol.raw_bits() == K(28,5),
