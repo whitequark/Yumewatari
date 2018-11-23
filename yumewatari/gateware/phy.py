@@ -81,7 +81,7 @@ class PCIePHY(Module):
                     # Accept TS1 Link=PAD Lane=PAD Loopback=1
                     # Accept TS2 Link=PAD Lane=PAD
                     If(rx.ts.valid & ~rx.ts.lane.valid & ~rx.ts.link.valid &
-                            (((rx.ts.ts_id == 0) & ~rx.ts.ctrl.compliance) |
+                            (((rx.ts.ts_id == 0) & ~rx.ts.ctrl.compliance_receive) |
                              ((rx.ts.ts_id == 0) & rx.ts.ctrl.loopback) |
                               (rx.ts.ts_id == 1)),
                         NextValue(rx_ts_count, rx_ts_count + 1),
